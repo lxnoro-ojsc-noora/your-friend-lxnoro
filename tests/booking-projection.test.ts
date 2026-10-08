@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { ScheduledActivity } from "../src/domain/model";
+import type { ActivityOccurrenceOverride, ScheduledActivity } from "../src/domain/model";
 import { assertProjectionRevisionAdvances, createBookingProjectionV1 } from "../src/domain/bookingProjection";
 
 const scheduled = (overrides: Partial<ScheduledActivity> = {}): ScheduledActivity => ({
@@ -62,5 +62,14 @@ describe("versioned interval-only booking projection", () => {
     expect(replacement.coverageEndUtc).toBe(first.coverageEndUtc);
     expect(() => assertProjectionRevisionAdvances(replacement, first.revision)).not.toThrow();
     expect(() => assertProjectionRevisionAdvances(first, replacement.revision)).toThrow(RangeError);
+  });
+
+  it("projects recurring routines after occurrence completion without exposing private identity", () => {
+    const routine = scheduled({ startLocal: "2026-10-08T09:00", timeZone: "Asia/Yerevan", recurrence: { frequency: "daily", interval: 1, count: 3 } });
+    const override: ActivityOccurrenceOverride = { id: `${routine.id}@2026-10-09T09:00`, activityId: routine.id, originalStartLocal: "2026-10-09T09:00", status: "complete", updatedAt: "2026-10-09T05:00:00Z" };
+    const projection = createBookingProjectionV1([routine], 8, { start: new Date("2026-10-08T00:00:00Z"), end: new Date("2026-10-12T00:00:00Z") }, [override]);
+    expect(projection.intervals).toHaveLength(2);
+    const serialized = JSON.stringify(projection);
+    for (const privateValue of [routine.id, routine.title, routine.notes]) expect(serialized).not.toContain(privateValue);
   });
 });

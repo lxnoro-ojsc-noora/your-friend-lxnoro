@@ -72,9 +72,10 @@ export class BookingSyncCoordinator {
       }
 
       const activities = await this.db.activities.toArray();
+      const overrides = await this.db.occurrenceOverrides.toArray();
       const revision = Math.max(previous?.revision ?? 0, serverRevision ?? 0) + 1;
       const { start, end } = horizonBounds("fiveYears", this.now());
-      const projection = createBookingProjectionV1(activities, revision, { start, end });
+      const projection = createBookingProjectionV1(activities, revision, { start, end }, overrides);
       await replacePendingBookingSnapshot(projection, this.db);
 
       if (!this.options.developmentOwnerId || !this.isOnline()) return;

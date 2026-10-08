@@ -1,7 +1,7 @@
 import Dexie, { type Table } from "dexie";
 import { createStarterTypes } from "./catalog";
 import type { BookingSyncOutboxRecord } from "./bookingSync";
-import type { ActivityType, Locale, Preferences, ReminderLedgerEntry, ScheduledActivity } from "../domain/model";
+import type { ActivityOccurrenceOverride, ActivityType, Locale, OccurrenceReminderLedgerEntry, Preferences, ReminderLedgerEntry, ScheduledActivity } from "../domain/model";
 
 export class LxnoroDatabase extends Dexie {
   activityTypes!: Table<ActivityType, string>;
@@ -9,6 +9,8 @@ export class LxnoroDatabase extends Dexie {
   preferences!: Table<Preferences, string>;
   reminderLedger!: Table<ReminderLedgerEntry, string>;
   bookingSyncOutbox!: Table<BookingSyncOutboxRecord, string>;
+  occurrenceOverrides!: Table<ActivityOccurrenceOverride, string>;
+  occurrenceReminderLedger!: Table<OccurrenceReminderLedgerEntry, string>;
 
   constructor(name = "your-friend-lxnoro") {
     super(name);
@@ -24,6 +26,23 @@ export class LxnoroDatabase extends Dexie {
       preferences: "id",
       reminderLedger: "activityId, dueAt",
       bookingSyncOutbox: "id",
+    });
+    this.version(4).stores({
+      activityTypes: "id, starterKey, createdAt",
+      activities: "id, typeId, startLocal, status",
+      preferences: "id",
+      reminderLedger: "activityId, dueAt",
+      bookingSyncOutbox: "id",
+      occurrenceOverrides: "id, activityId, originalStartLocal, status",
+    });
+    this.version(5).stores({
+      activityTypes: "id, starterKey, createdAt",
+      activities: "id, typeId, startLocal, status",
+      preferences: "id",
+      reminderLedger: "activityId, dueAt",
+      bookingSyncOutbox: "id",
+      occurrenceOverrides: "id, activityId, originalStartLocal, status",
+      occurrenceReminderLedger: "occurrenceKey, activityId, dueAt",
     });
   }
 }

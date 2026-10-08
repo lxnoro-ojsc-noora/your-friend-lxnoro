@@ -1,5 +1,6 @@
-import type { ScheduledActivity } from "./model";
+import type { ActivityOccurrenceOverride, ScheduledActivity } from "./model";
 import { activityInstant } from "./time";
+import { expandActivities } from "./recurrence";
 
 export interface BusyIntervalV1 {
   startUtc: string;
@@ -63,6 +64,7 @@ export function createBookingProjectionV1(
   activities: readonly ScheduledActivity[],
   revision: number,
   window: BookingProjectionWindow,
+  overrides: readonly ActivityOccurrenceOverride[] = [],
 ): BookingProjectionV1 {
   if (!Number.isSafeInteger(revision) || revision <= 0) {
     throw new RangeError("Booking projection revision must be a positive safe integer");
@@ -71,8 +73,13 @@ export function createBookingProjectionV1(
   const { startMs: coverageStartMs, endMs: coverageEndMs } = requireValidWindow(window);
   const intervals: BusyIntervalV1[] = [];
 
-  for (const activity of activities) {
-    if (activity.status !== "scheduled") continue;
+  const lastCoveredDate = new Date(coverageEndMs - 1).toISOString().slice(0, 10);
+  const exclusiveEndDate = new Date(Date.parse(`${lastCoveredDate}T00:00:00.000Z`) + 86_400_000).toISOString().slice(0, 10);
+  const firstCoveredDate = new Date(coverageStartMs).toISOString().slice(0, 10);
+  const bufferedStartDate = new Date(Date.parse(`${firstCoveredDate}T00:00:00.000Z`) - 86_400_000).toISOString().slice(0, 10);
+  const bufferedEndDate = new Date(Date.parse(`${exclusiveEndDate}T00:00:00.000Z`) + 86_400_000).toISOString().slice(0, 10);
+  const occurrences = expandActivities(activities, bufferedStartDate, bufferedEndDate, overrides);
+  for (const activity of occurrences) {
     if (!Number.isSafeInteger(activity.durationMinutes) || activity.durationMinutes <= 0) {
       throw new RangeError("Scheduled activity duration must be a positive whole number of minutes");
     }

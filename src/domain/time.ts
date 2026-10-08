@@ -66,6 +66,12 @@ export function activityInstant(startLocal: string, timeZone: string): Date {
   return localDateTime(activityDateKey(startLocal), startLocal.slice(11, 16), timeZone);
 }
 
+export function addActivityMinutes(startLocal: string, timeZone: string, minutes: number): string {
+  const instant = activityInstant(startLocal, timeZone);
+  const zoned = Temporal.Instant.fromEpochMilliseconds(instant.getTime()).add({ minutes }).toZonedDateTimeISO(timeZone);
+  return `${zoned.toPlainDate().toString()}T${String(zoned.hour).padStart(2, "0")}:${String(zoned.minute).padStart(2, "0")}`;
+}
+
 export function minutesIntoDay(startLocal: string): number {
   const time = startLocal.slice(11, 16);
   const [hours = 0, minutes = 0] = time.split(":").map(Number);

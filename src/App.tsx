@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent } from "react";
 import { database, initializeDatabase } from "./data/database";
 import { formatStarterTitle, formatDate, formatTime, translate, type MessageKey } from "./i18n/messages";
-import { activityDateKey, activityInstant, horizonBounds, isInRange, localDateKey, minutesIntoDay, nearestQuarterDate } from "./domain/time";
-import type { ActivityType, Horizon, Locale, Preferences, ScheduledActivity } from "./domain/model";
+import { activityDateKey, activityInstant, addActivityMinutes, horizonBounds, isInRange, localDateKey, minutesIntoDay, nearestQuarterDate } from "./domain/time";
+import type { ActivityOccurrenceOverride, ActivityType, Horizon, Locale, OccurrenceReminderLedgerEntry, Preferences, ScheduledActivity, ScheduledOccurrence } from "./domain/model";
 import { dueActivities } from "./domain/reminders";
+import { expandActivities, occurrenceOverrideId, recurrenceRuleFromInput } from "./domain/recurrence";
 import { deliverReminder, requestNotificationPermission } from "./platform/reminderDelivery";
 import { BookingSyncCoordinator } from "./platform/bookingSyncCoordinator";
 
@@ -29,6 +30,10 @@ function localDateTimeInput(date: Date): { date: string; time: string } {
 
 function makeId(): string {
   return crypto.randomUUID();
+}
+
+function isScheduledOccurrence(activity: ScheduledActivity): activity is ScheduledOccurrence {
+  return "occurrenceKey" in activity && "originalStartLocal" in activity && "seriesStartLocal" in activity && "seriesStatus" in activity;
 }
 
 function buildBuckets(horizon: Horizon, anchor: Date, locale: Locale) {
@@ -72,6 +77,8 @@ function ActivityDialog({
   onSaveType,
   onSaveActivity,
   onDeleteActivity,
+  onCompleteOccurrence,
+  onPostponeOccurrence,
 }: {
   kind: "type" | "schedule" | "custom" | "profile";
   activityType?: ActivityType;
@@ -82,6 +89,8 @@ function ActivityDialog({
   onSaveType: (type: ActivityType) => Promise<void>;
   onSaveActivity: (entry: ScheduledActivity) => Promise<void>;
   onDeleteActivity: (entry: ScheduledActivity) => Promise<void>;
+  onCompleteOccurrence: (entry: ScheduledOccurrence) => Promise<void>;
+  onPostponeOccurrence: (entry: ScheduledOccurrence) => Promise<void>;
 }) {
   const t = (key: MessageKey) => translate(locale, key);
   const now = localDateTimeInput(new Date());
@@ -92,6 +101,11 @@ function ActivityDialog({
   const [duration, setDuration] = useState(String(activity?.durationMinutes ?? 30));
   const [notes, setNotes] = useState(activity?.notes ?? "");
   const [alertEnabled, setAlertEnabled] = useState(activity?.alertEnabled ?? true);
+  const [frequency, setFrequency] = useState(activity?.recurrence?.frequency ?? "");
+  const [interval, setInterval] = useState(String(activity?.recurrence?.interval ?? 1));
+  const [count, setCount] = useState(String(activity?.recurrence?.count ?? ""));
+  const [untilDate, setUntilDate] = useState(activity?.recurrence?.untilLocal?.slice(0, 10) ?? "");
+  const [weekdays, setWeekdays] = useState<number[]>(activity?.recurrence?.weekdays ?? [((new Date(`${activity ? activityDateKey(activity.startLocal) : now.date}T00:00:00Z`).getUTCDay() + 6) % 7) + 1]);
   const [country, setCountry] = useState(preferences?.country ?? "");
   const [city, setCity] = useState(preferences?.city ?? "");
   const [saving, setSaving] = useState(false);
@@ -139,6 +153,7 @@ function ActivityDialog({
           notes,
           alertEnabled,
           createdAt: activity?.createdAt ?? new Date().toISOString(),
+          ...(recurrenceRuleFromInput(frequency, interval, count, untilDate, weekdays) ? { recurrence: recurrenceRuleFromInput(frequency, interval, count, untilDate, weekdays) } : {}),
         });
       }
       onClose();
@@ -158,10 +173,13 @@ function ActivityDialog({
             <label className="grow-field">{t("activityName")}<input value={title} onChange={(event) => setTitle(event.target.value)} maxLength={90} required autoFocus /></label>
           </div>
           {kind === "schedule" && <div className="form-row"><label>{t("date")}<input type="date" value={date} onChange={(event) => setDate(event.target.value)} required /></label><label>{t("startTime")}<input type="time" value={time} onChange={(event) => setTime(event.target.value)} required /></label><label>{t("duration")}<input type="number" value={duration} min={5} max={1440} step={5} onChange={(event) => setDuration(event.target.value)} required /></label></div>}
+          {kind === "schedule" && <div className="form-row"><label>{t("repeat")}<select value={frequency} onChange={(event) => setFrequency(event.target.value)}><option value="">{t("never")}</option>{(["daily", "weekly", "monthly", "yearly"] as const).map((value) => <option key={value} value={value}>{t(value)}</option>)}</select></label>{frequency && <><label>{t("every")}<input type="number" min={1} max={365} value={interval} onChange={(event) => setInterval(event.target.value)} /></label><label>{t("count")} ({t("occurrences")})<input type="number" min={1} value={count} onChange={(event) => setCount(event.target.value)} placeholder="∞" /></label><label>{t("repeatUntil")}<input type="date" min={date} value={untilDate} onChange={(event) => setUntilDate(event.target.value)} /></label></>}</div>}
+          {kind === "schedule" && frequency === "weekly" && <fieldset className="form-row"><legend>{t("weekdays")}</legend>{([1, 2, 3, 4, 5, 6, 7] as const).map((day) => <label key={day}><input type="checkbox" checked={weekdays.includes(day)} onChange={(event) => setWeekdays((current) => event.target.checked ? [...current, day].sort((a, b) => a - b) : current.filter((value) => value !== day))} />{t((`weekday${day}`) as MessageKey)}</label>)}</fieldset>}
           {kind === "schedule" && <div className="notes-field"><label htmlFor="activity-notes">{t("notes")}</label><textarea id="activity-notes" value={notes} onChange={(event) => setNotes(event.target.value)} maxLength={12000} rows={2} placeholder={t("notesPlaceholder")} aria-describedby="notes-count" /><div className="notes-meta"><span id="notes-count">{noteWords} / 1,000</span>{noteWords > 1000 && <span className="note-limit" role="alert">{t("noteWordLimit")}</span>}</div></div>}
           {kind === "schedule" && <label className="alert-toggle"><input type="checkbox" checked={alertEnabled} onChange={(event) => setAlertEnabled(event.target.checked)} />{t("alertEnabled")}</label>}
           <div className="dialog-actions">
             {activity && <button type="button" className="button danger-ghost" onClick={() => void onDeleteActivity(activity)}>{t("remove")}</button>}
+            {activity && isScheduledOccurrence(activity) && <><button type="button" className="button secondary" onClick={() => void onCompleteOccurrence(activity)}>{t("complete")}</button><button type="button" className="button secondary" onClick={() => void onPostponeOccurrence(activity)}>{t("postpone")}</button></>}
             <span className="action-spacer" />
             <button type="button" className="button secondary" onClick={onClose}>{t("cancel")}</button>
             <button type="submit" className="button primary" disabled={saving || noteWords > 1000}>{t("save")}</button>
@@ -173,7 +191,7 @@ function ActivityDialog({
 }
 
 function ReminderDialog({ activity, locale, onDismiss, onComplete }: {
-  activity: ScheduledActivity;
+  activity: ScheduledOccurrence;
   locale: Locale;
   onDismiss: () => void;
   onComplete: () => void;
@@ -193,7 +211,7 @@ function ReminderDialog({ activity, locale, onDismiss, onComplete }: {
 }
 
 function DayMatrix({ activities, selectedDate, locale, onSelect, now }: {
-  activities: ScheduledActivity[];
+  activities: ScheduledOccurrence[];
   selectedDate: string;
   locale: Locale;
   onSelect: (activity: ScheduledActivity) => void;
@@ -220,7 +238,7 @@ function DayMatrix({ activities, selectedDate, locale, onSelect, now }: {
           const startMinutes = minutesIntoDay(activity.startLocal);
           const width = Math.max((Math.min(activity.durationMinutes, 1440 - startMinutes) / 1440) * 100, 1.5);
           return (
-            <div className="activity-lane" key={activity.id}>
+            <div className="activity-lane" key={activity.occurrenceKey}>
               <div className="lane-label"><span className="lane-symbol">{activity.symbol}</span><span className="lane-title">{activity.title}</span></div>
               <div className="lane-track">
                 {current && <div className="now-line" style={{ insetInlineStart: `${nowPercent}%` }} />}
@@ -240,7 +258,7 @@ function DayMatrix({ activities, selectedDate, locale, onSelect, now }: {
 function HorizonMatrix({ horizon, anchor, activities, locale, onSelect }: {
   horizon: Exclude<Horizon, "day">;
   anchor: Date;
-  activities: ScheduledActivity[];
+  activities: ScheduledOccurrence[];
   locale: Locale;
   onSelect: (activity: ScheduledActivity) => void;
 }) {
@@ -252,7 +270,7 @@ function HorizonMatrix({ horizon, anchor, activities, locale, onSelect }: {
         const items = activities.filter((entry) => isInRange(entry.startLocal, bucket.date, bucket.end));
         return <section className="horizon-cell" key={bucket.key} aria-label={bucket.label}>
           <header>{bucket.label}</header>
-          {items.length ? items.map((entry) => <button className="horizon-activity" key={entry.id} onClick={() => onSelect(entry)}><span>{entry.symbol}</span><strong>{entry.title}</strong><small>{formatShortTime(entry)}</small></button>) : <span className="horizon-empty">·</span>}
+          {items.length ? items.map((entry) => <button className="horizon-activity" key={entry.occurrenceKey} onClick={() => onSelect(entry)}><span>{entry.symbol}</span><strong>{entry.title}</strong><small>{formatShortTime(entry)}</small></button>) : <span className="horizon-empty">·</span>}
         </section>;
       })}
     </div>
@@ -262,6 +280,7 @@ function HorizonMatrix({ horizon, anchor, activities, locale, onSelect }: {
 export function App() {
   const [types, setTypes] = useState<ActivityType[]>([]);
   const [activities, setActivities] = useState<ScheduledActivity[]>([]);
+  const [occurrenceOverrides, setOccurrenceOverrides] = useState<ActivityOccurrenceOverride[]>([]);
   const [preferences, setPreferences] = useState<Preferences | null>(null);
   const [selectedDate, setSelectedDate] = useState(localDateKey(new Date()));
   const [horizon, setHorizon] = useState<Horizon>("day");
@@ -269,7 +288,7 @@ export function App() {
   const [dialog, setDialog] = useState<{ kind: "type" | "schedule" | "custom" | "profile"; type?: ActivityType; activity?: ScheduledActivity } | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
-  const [reminderQueue, setReminderQueue] = useState<ScheduledActivity[]>([]);
+  const [reminderQueue, setReminderQueue] = useState<ScheduledOccurrence[]>([]);
   const [notice, setNotice] = useState("");
   const reminderScanActive = useRef(false);
   const reminderInFlight = useRef(new Set<string>());
@@ -282,20 +301,23 @@ export function App() {
     return new Date(year, month - 1, day);
   }, [selectedDate]);
   const range = useMemo(() => horizonBounds(horizon, selectedDateObject), [horizon, selectedDateObject]);
-  const visibleActivities = useMemo(() => activities.filter((entry) => isInRange(entry.startLocal, range.start, range.end)), [activities, range]);
-  const dayActivities = useMemo(() => activities.filter((entry) => activityDateKey(entry.startLocal) === selectedDate).sort((a, b) => activityInstant(a.startLocal, a.timeZone).getTime() - activityInstant(b.startLocal, b.timeZone).getTime()), [activities, selectedDate]);
-  const nextActivity = useMemo(() => activities
-    .filter((entry) => entry.status === "scheduled" && activityInstant(entry.startLocal, entry.timeZone) >= now)
-    .sort((a, b) => activityInstant(a.startLocal, a.timeZone).getTime() - activityInstant(b.startLocal, b.timeZone).getTime())[0], [activities, now]);
+  const horizonOccurrences = useMemo(() => expandActivities(activities, localDateKey(range.start), localDateKey(range.end), occurrenceOverrides), [activities, occurrenceOverrides, range]);
+  const visibleActivities = horizonOccurrences;
+  const dayActivities = useMemo(() => expandActivities(activities, selectedDate, new Date(Date.parse(`${selectedDate}T00:00:00`) + 86_400_000).toISOString().slice(0, 10), occurrenceOverrides), [activities, occurrenceOverrides, selectedDate]);
+  const nextActivity = useMemo(() => expandActivities(activities, localDateKey(now), new Date(Date.parse(`${localDateKey(now)}T00:00:00`) + 5 * 366 * 86_400_000).toISOString().slice(0, 10), occurrenceOverrides)
+    .filter((entry) => activityInstant(entry.startLocal, entry.timeZone) >= now)
+    .sort((a, b) => activityInstant(a.startLocal, a.timeZone).getTime() - activityInstant(b.startLocal, b.timeZone).getTime())[0], [activities, occurrenceOverrides, now]);
 
   const refresh = async () => {
-    const [savedTypes, savedActivities, savedPreferences] = await Promise.all([
+    const [savedTypes, savedActivities, savedPreferences, savedOverrides] = await Promise.all([
       database.activityTypes.toArray(),
       database.activities.toArray(),
       database.preferences.get("main"),
+      database.occurrenceOverrides.toArray(),
     ]);
     setTypes(savedTypes.sort((a, b) => a.createdAt.localeCompare(b.createdAt)));
     setActivities(savedActivities);
+    setOccurrenceOverrides(savedOverrides);
     if (savedPreferences) setPreferences(savedPreferences);
   };
 
@@ -325,11 +347,17 @@ export function App() {
       if (!active || reminderScanActive.current || document.visibilityState === "hidden") return;
       reminderScanActive.current = true;
       try {
-        const ledger = await database.reminderLedger.toArray();
-        const due = dueActivities(activities, ledger, new Date()).filter((activity) => !reminderInFlight.current.has(activity.id));
+        const [legacyLedger, occurrenceLedger] = await Promise.all([database.reminderLedger.toArray(), database.occurrenceReminderLedger.toArray()]);
+        const ledger = [...legacyLedger, ...occurrenceLedger];
+        const startDate = activities.length ? activities.map((entry) => activityDateKey(entry.startLocal)).sort()[0] as string : localDateKey(new Date());
+        const today = localDateKey(new Date());
+        const throughTomorrow = new Date(Date.parse(`${today}T00:00:00`) + 86_400_000).toISOString().slice(0, 10);
+        const due = dueActivities(expandActivities(activities, startDate, throughTomorrow, occurrenceOverrides), ledger, new Date()).filter((activity) => !reminderInFlight.current.has(activity.occurrenceKey));
         if (due.length) {
-          due.forEach(({ id }) => reminderInFlight.current.add(id));
-          await database.reminderLedger.bulkPut(due.map((activity) => ({ activityId: activity.id, dueAt: activity.startLocal, presentedAt: new Date().toISOString() })));
+          due.forEach(({ occurrenceKey }) => reminderInFlight.current.add(occurrenceKey));
+          const presentedAt = new Date().toISOString();
+          const entries: OccurrenceReminderLedgerEntry[] = due.map((activity) => ({ occurrenceKey: activity.occurrenceKey, activityId: activity.id, dueAt: activity.startLocal, presentedAt }));
+          await database.occurrenceReminderLedger.bulkPut(entries);
           if (active) setReminderQueue((queue) => [...queue, ...due]);
           await Promise.all(due.map((activity) => deliverReminder(activity)));
         }
@@ -346,7 +374,7 @@ export function App() {
     window.addEventListener("focus", onResume);
     document.addEventListener("visibilitychange", onResume);
     return () => { active = false; window.clearTimeout(firstScan); window.clearInterval(timer); window.removeEventListener("focus", onResume); document.removeEventListener("visibilitychange", onResume); };
-  }, [activities, loading]);
+  }, [activities, occurrenceOverrides, loading]);
 
   useEffect(() => {
     document.documentElement.lang = locale;
@@ -362,11 +390,15 @@ export function App() {
   const saveActivity = async (entry: ScheduledActivity) => {
     try {
       const existing = await database.activities.get(entry.id);
-      await database.transaction("rw", database.activities, database.reminderLedger, async () => {
+      await database.transaction("rw", database.activities, database.reminderLedger, database.occurrenceOverrides, database.occurrenceReminderLedger, async () => {
         await database.activities.put(entry);
         if (!existing || existing.startLocal !== entry.startLocal || existing.status !== entry.status || existing.alertEnabled !== entry.alertEnabled) {
           await database.reminderLedger.delete(entry.id);
-          reminderInFlight.current.delete(entry.id);
+          for (const key of reminderInFlight.current) if (key.startsWith(`${entry.id}@`)) reminderInFlight.current.delete(key);
+        }
+        if (existing && (existing.startLocal !== entry.startLocal || JSON.stringify(existing.recurrence) !== JSON.stringify(entry.recurrence))) {
+          await database.occurrenceOverrides.where("activityId").equals(entry.id).delete();
+          await database.occurrenceReminderLedger.where("activityId").equals(entry.id).delete();
         }
       });
       await refresh(); setError("");
@@ -382,8 +414,41 @@ export function App() {
   };
 
   const deleteActivity = async (entry: ScheduledActivity) => {
-    try { await database.activities.delete(entry.id); await refresh(); setDialog(null); void bookingSync.current?.projectionChanged(); }
+    try { await database.transaction("rw", database.activities, database.occurrenceOverrides, database.occurrenceReminderLedger, async () => { await database.activities.delete(entry.id); await database.occurrenceOverrides.where("activityId").equals(entry.id).delete(); await database.occurrenceReminderLedger.where("activityId").equals(entry.id).delete(); }); await refresh(); setDialog(null); void bookingSync.current?.projectionChanged(); }
     catch { setError(t("storageError")); }
+  };
+
+  const completeOccurrence = async (occurrence: ScheduledOccurrence) => {
+    try {
+      if (!occurrence.recurrence) {
+        const base = await database.activities.get(occurrence.id);
+        if (base) await saveActivity({ ...base, status: "complete" });
+      } else {
+        const override: ActivityOccurrenceOverride = { id: occurrenceOverrideId(occurrence.id, occurrence.originalStartLocal), activityId: occurrence.id, originalStartLocal: occurrence.originalStartLocal, status: "complete", updatedAt: new Date().toISOString() };
+        await database.occurrenceOverrides.put(override);
+        await refresh();
+        void bookingSync.current?.projectionChanged();
+      }
+      reminderInFlight.current.delete(occurrence.occurrenceKey);
+      setDialog(null);
+    } catch { setError(t("storageError")); }
+  };
+
+  const postponeOccurrence = async (occurrence: ScheduledOccurrence) => {
+    try {
+      const nextStart = addActivityMinutes(occurrence.startLocal, occurrence.timeZone, 15);
+      if (!occurrence.recurrence) {
+        const base = await database.activities.get(occurrence.id);
+        if (base) await saveActivity({ ...base, startLocal: nextStart });
+      } else {
+        const override: ActivityOccurrenceOverride = { id: occurrenceOverrideId(occurrence.id, occurrence.originalStartLocal), activityId: occurrence.id, originalStartLocal: occurrence.originalStartLocal, status: "postponed", startLocal: nextStart, updatedAt: new Date().toISOString() };
+        await database.occurrenceOverrides.put(override);
+        await refresh();
+        void bookingSync.current?.projectionChanged();
+      }
+      reminderInFlight.current.delete(occurrence.occurrenceKey);
+      setDialog(null);
+    } catch { setError(t("storageError")); }
   };
 
   const selectLanguage = async (nextLocale: Locale) => {
@@ -399,9 +464,9 @@ export function App() {
   };
 
   const dismissReminder = () => setReminderQueue((queue) => queue.slice(1));
-  const completeReminder = async (activity: ScheduledActivity) => {
-    await saveActivity({ ...activity, status: "complete" });
-    setReminderQueue((queue) => queue.filter(({ id }) => id !== activity.id));
+  const completeReminder = async (activity: ScheduledOccurrence) => {
+    await completeOccurrence(activity);
+    setReminderQueue((queue) => queue.filter(({ occurrenceKey }) => occurrenceKey !== activity.occurrenceKey));
   };
 
   const activeReminder = reminderQueue[0];
@@ -459,7 +524,7 @@ export function App() {
 
       <footer className="app-footer"><span><span className="privacy-dot" />{t("saved")}</span><span>{preferences.city ? `${preferences.city}${preferences.country ? `, ${preferences.country}` : ""}` : t("locationNotSet")}</span></footer>
 
-      {dialog && <ActivityDialog kind={dialog.kind} activityType={dialog.type} activity={dialog.activity} preferences={preferences} locale={locale} onClose={() => setDialog(null)} onSaveType={saveActivityType} onSaveActivity={saveActivity} onDeleteActivity={deleteActivity} />}
+      {dialog && <ActivityDialog kind={dialog.kind} activityType={dialog.type} activity={dialog.activity} preferences={preferences} locale={locale} onClose={() => setDialog(null)} onSaveType={saveActivityType} onSaveActivity={saveActivity} onDeleteActivity={deleteActivity} onCompleteOccurrence={completeOccurrence} onPostponeOccurrence={postponeOccurrence} />}
       {activeReminder && <ReminderDialog activity={activeReminder} locale={locale} onDismiss={dismissReminder} onComplete={() => void completeReminder(activeReminder)} />}
     </main>
   );
