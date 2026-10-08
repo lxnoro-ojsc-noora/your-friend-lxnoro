@@ -1,6 +1,6 @@
 ﻿---
 doc: prd
-status: draft
+status: approved
 ---
 
 # Your friend LXNORO — Product Requirements
