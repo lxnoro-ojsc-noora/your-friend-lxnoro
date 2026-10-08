@@ -1,0 +1,27 @@
+{
+  "name": "your-friend-lxnoro",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev:web": "vite --host 127.0.0.1",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview --host 127.0.0.1",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "dexie": "^4.2.1",
+    "react": "^19.1.1",
+    "react-dom": "^19.1.1"
+  },
+  "devDependencies": {
+    "@types/react": "^19.1.10",
+    "@types/react-dom": "^19.1.7",
+    "@vitejs/plugin-react": "^5.0.2",
+    "fake-indexeddb": "^6.2.2",
+    "typescript": "~5.8.3",
+    "vite": "^7.1.4",
+    "vitest": "^3.2.4"
+  }
+}

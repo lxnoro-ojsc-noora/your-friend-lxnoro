@@ -1,0 +1,17 @@
+{
+  "name": "Your friend LXNORO",
+  "short_name": "LXNORO",
+  "description": "A personal time engine for the things that matter.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0b0911",
+  "theme_color": "#0b0911",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
