@@ -5,6 +5,7 @@ import { activityDateKey, activityInstant, horizonBounds, isInRange, localDateKe
 import type { ActivityType, Horizon, Locale, Preferences, ScheduledActivity } from "./domain/model";
 import { dueActivities } from "./domain/reminders";
 import { deliverReminder, requestNotificationPermission } from "./platform/reminderDelivery";
+import { BookingSyncCoordinator } from "./platform/bookingSyncCoordinator";
 
 const horizonLabels: Record<Horizon, MessageKey> = {
   day: "day",
@@ -272,6 +273,7 @@ export function App() {
   const [notice, setNotice] = useState("");
   const reminderScanActive = useRef(false);
   const reminderInFlight = useRef(new Set<string>());
+  const bookingSync = useRef<BookingSyncCoordinator | null>(null);
 
   const locale: Locale = preferences?.locale ?? "en";
   const t = (key: MessageKey) => translate(locale, key);
@@ -299,14 +301,21 @@ export function App() {
 
   useEffect(() => {
     let active = true;
-    void initializeDatabase().then(refresh).catch(() => { if (active) setError(translate("en", "storageError")); }).finally(() => { if (active) setLoading(false); });
+    void initializeDatabase().then(async () => {
+      await refresh();
+      if (active && import.meta.env.DEV) {
+        const coordinator = new BookingSyncCoordinator({ developmentOwnerId: "local-owner" });
+        bookingSync.current = coordinator;
+        coordinator.start();
+      }
+    }).catch(() => { if (active) setError(translate("en", "storageError")); }).finally(() => { if (active) setLoading(false); });
     const ticker = window.setInterval(() => setNow(new Date()), 30_000);
     const profileListener = (event: Event) => {
       const detail = (event as CustomEvent<{ country: string; city: string }>).detail;
       void database.preferences.update("main", { country: detail.country.trim(), city: detail.city.trim() }).then(refresh).catch(() => setError(t("storageError")));
     };
     window.addEventListener("lxnoro:profile", profileListener);
-    return () => { active = false; window.clearInterval(ticker); window.removeEventListener("lxnoro:profile", profileListener); };
+    return () => { active = false; bookingSync.current?.stop(); bookingSync.current = null; window.clearInterval(ticker); window.removeEventListener("lxnoro:profile", profileListener); };
   }, []);
 
   useEffect(() => {
@@ -361,6 +370,7 @@ export function App() {
         }
       });
       await refresh(); setError("");
+      void bookingSync.current?.projectionChanged();
     }
     catch { setError(t("storageError")); }
   };
@@ -372,7 +382,7 @@ export function App() {
   };
 
   const deleteActivity = async (entry: ScheduledActivity) => {
-    try { await database.activities.delete(entry.id); await refresh(); setDialog(null); }
+    try { await database.activities.delete(entry.id); await refresh(); setDialog(null); void bookingSync.current?.projectionChanged(); }
     catch { setError(t("storageError")); }
   };
 

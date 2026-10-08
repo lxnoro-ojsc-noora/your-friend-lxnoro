@@ -44,7 +44,7 @@ export async function publishBookingProjection(
   if (!response.ok) {
     throw new BookingApiError(response.status, typeof result.code === "string" ? result.code : "request_failed");
   }
-  if (!Number.isSafeInteger(result.revision) || !Number.isSafeInteger(result.intervalCount) || typeof result.updatedAt !== "string") {
+  if (result.revision !== projection.revision || result.intervalCount !== projection.intervals.length || typeof result.updatedAt !== "string") {
     throw new BookingApiError(response.status, "invalid_server_response");
   }
   return {
