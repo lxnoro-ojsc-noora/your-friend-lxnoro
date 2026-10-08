@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { dueActivities } from "../src/domain/reminders";
+import { localDateTime } from "../src/domain/time";
 import type { ReminderLedgerEntry, ScheduledActivity } from "../src/domain/model";
 
 const scheduled = (overrides: Partial<ScheduledActivity> = {}): ScheduledActivity => ({
@@ -10,12 +11,12 @@ const scheduled = (overrides: Partial<ScheduledActivity> = {}): ScheduledActivit
 
 describe("local reminder due calculation", () => {
   it("returns scheduled alert-enabled activities once their local time is due", () => {
-    const now = new Date(2026, 9, 8, 8, 30);
+    const now = localDateTime("2026-10-08", "08:30", "Asia/Yerevan");
     expect(dueActivities([scheduled()], [], now).map(({ id }) => id)).toEqual(["task-1"]);
   });
 
   it("does not present future, completed, or alert-disabled activities", () => {
-    const now = new Date(2026, 9, 8, 8, 30);
+    const now = localDateTime("2026-10-08", "08:30", "Asia/Yerevan");
     expect(dueActivities([
       scheduled({ id: "future", startLocal: "2026-10-08T09:00" }),
       scheduled({ id: "complete", status: "complete" }),
@@ -25,10 +26,17 @@ describe("local reminder due calculation", () => {
 
   it("uses the local ledger to prevent repeat presentation after dismissal or reload", () => {
     const ledger: ReminderLedgerEntry[] = [{ activityId: "task-1", dueAt: "2026-10-08T08:15", presentedAt: "2026-10-08T08:15:00.000Z" }];
-    expect(dueActivities([scheduled()], ledger, new Date(2026, 9, 8, 8, 30))).toEqual([]);
+    expect(dueActivities([scheduled()], ledger, localDateTime("2026-10-08", "08:30", "Asia/Yerevan"))).toEqual([]);
   });
 
   it("keeps overdue tasks eligible for one catch-up when the app resumes", () => {
-    expect(dueActivities([scheduled()], [], new Date(2026, 9, 8, 12, 0))).toHaveLength(1);
+    expect(dueActivities([scheduled()], [], localDateTime("2026-10-08", "12:00", "Asia/Yerevan"))).toHaveLength(1);
+  });
+
+  it("orders reminders from different zones by their actual instants", () => {
+    const tokyo = scheduled({ id: "tokyo", startLocal: "2026-10-08T09:00", timeZone: "Asia/Tokyo" });
+    const losAngeles = scheduled({ id: "los-angeles", startLocal: "2026-10-08T09:00", timeZone: "America/Los_Angeles" });
+    const due = dueActivities([losAngeles, tokyo], [], localDateTime("2026-10-08", "18:00", "UTC"));
+    expect(due.map(({ id }) => id)).toEqual(["tokyo", "los-angeles"]);
   });
 });

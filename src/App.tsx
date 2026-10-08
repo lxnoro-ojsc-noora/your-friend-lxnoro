@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent } from "react";
 import { database, initializeDatabase } from "./data/database";
 import { formatStarterTitle, formatDate, formatTime, translate, type MessageKey } from "./i18n/messages";
-import { activityDateKey, horizonBounds, isInRange, localDateKey, localDateTime, minutesIntoDay, nearestQuarterDate } from "./domain/time";
+import { activityDateKey, activityInstant, horizonBounds, isInRange, localDateKey, minutesIntoDay, nearestQuarterDate } from "./domain/time";
 import type { ActivityType, Horizon, Locale, Preferences, ScheduledActivity } from "./domain/model";
 import { dueActivities } from "./domain/reminders";
 import { deliverReminder, requestNotificationPermission } from "./platform/reminderDelivery";
@@ -132,7 +132,7 @@ function ActivityDialog({
           title: title.trim(),
           symbol: symbol.trim() || "✨",
           startLocal: `${date}T${time}`,
-          timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
+          timeZone: activity?.timeZone ?? Intl.DateTimeFormat().resolvedOptions().timeZone ?? "UTC",
           durationMinutes: Number(duration),
           status: activity?.status ?? "scheduled",
           notes,
@@ -178,11 +178,12 @@ function ReminderDialog({ activity, locale, onDismiss, onComplete }: {
   onComplete: () => void;
 }) {
   const t = (key: MessageKey) => translate(locale, key);
+  const instant = activityInstant(activity.startLocal, activity.timeZone);
   return (
     <div className="dialog-backdrop reminder-backdrop">
       <section className="dialog-card reminder-card" role="dialog" aria-modal="true" aria-labelledby="reminder-title">
         <span className="eyebrow">{t("reminderTitle")}</span>
-        <div className="reminder-activity"><span className="reminder-symbol">{activity.symbol}</span><div><h2 id="reminder-title">{activity.title}</h2><p>{formatDate(localDateTime(activity.startLocal.slice(0, 10), activity.startLocal.slice(11, 16)), locale)} · {formatTime(localDateTime(activity.startLocal.slice(0, 10), activity.startLocal.slice(11, 16)), locale)}</p></div></div>
+        <div className="reminder-activity"><span className="reminder-symbol">{activity.symbol}</span><div><h2 id="reminder-title">{activity.title}</h2><p>{formatDate(instant, locale, { timeZone: activity.timeZone })} · {formatTime(instant, locale, activity.timeZone)}</p></div></div>
         {activity.notes.trim() ? <div className="reminder-notes"><span className="focus-label">{t("notes")}</span><p>{activity.notes}</p></div> : <p className="muted small-copy">{t("noNotes")}</p>}
         <div className="dialog-actions"><button className="button secondary" onClick={onDismiss}>{t("reminderDismiss")}</button><button className="button primary" onClick={onComplete}>{t("complete")}</button></div>
       </section>
@@ -243,7 +244,7 @@ function HorizonMatrix({ horizon, anchor, activities, locale, onSelect }: {
   onSelect: (activity: ScheduledActivity) => void;
 }) {
   const { buckets } = buildBuckets(horizon, anchor, locale);
-  const formatShortTime = (entry: ScheduledActivity) => formatTime(localDateTime(entry.startLocal.slice(0, 10), entry.startLocal.slice(11, 16)), locale);
+  const formatShortTime = (entry: ScheduledActivity) => formatTime(activityInstant(entry.startLocal, entry.timeZone), locale, entry.timeZone);
   return (
     <div className={`horizon-board horizon-${horizon}`} style={{ "--bucket-count": buckets.length } as CSSProperties}>
       {buckets.map((bucket) => {
@@ -280,10 +281,10 @@ export function App() {
   }, [selectedDate]);
   const range = useMemo(() => horizonBounds(horizon, selectedDateObject), [horizon, selectedDateObject]);
   const visibleActivities = useMemo(() => activities.filter((entry) => isInRange(entry.startLocal, range.start, range.end)), [activities, range]);
-  const dayActivities = useMemo(() => activities.filter((entry) => activityDateKey(entry.startLocal) === selectedDate).sort((a, b) => a.startLocal.localeCompare(b.startLocal)), [activities, selectedDate]);
+  const dayActivities = useMemo(() => activities.filter((entry) => activityDateKey(entry.startLocal) === selectedDate).sort((a, b) => activityInstant(a.startLocal, a.timeZone).getTime() - activityInstant(b.startLocal, b.timeZone).getTime()), [activities, selectedDate]);
   const nextActivity = useMemo(() => activities
-    .filter((entry) => entry.status === "scheduled" && localDateTime(activityDateKey(entry.startLocal), entry.startLocal.slice(11, 16)) >= now)
-    .sort((a, b) => a.startLocal.localeCompare(b.startLocal))[0], [activities, now]);
+    .filter((entry) => entry.status === "scheduled" && activityInstant(entry.startLocal, entry.timeZone) >= now)
+    .sort((a, b) => activityInstant(a.startLocal, a.timeZone).getTime() - activityInstant(b.startLocal, b.timeZone).getTime())[0], [activities, now]);
 
   const refresh = async () => {
     const [savedTypes, savedActivities, savedPreferences] = await Promise.all([
@@ -422,7 +423,7 @@ export function App() {
 
       <section className="focus-row" aria-label={`${t("now")} and ${t("next")}`}>
         <article className="focus-card now-card"><span className="focus-symbol">◉</span><div><span className="focus-label">{t("now")}</span><strong>{formatTime(now, locale)}</strong></div><span className="focus-live">{t("live")}</span></article>
-        <article className="focus-card next-card"><span className="focus-symbol">↗</span><div className="next-content"><span className="focus-label">{t("next")}</span>{nextActivity ? <strong>{nextActivity.symbol} {nextActivity.title}<small>{formatTime(localDateTime(activityDateKey(nextActivity.startLocal), nextActivity.startLocal.slice(11, 16)), locale)}</small></strong> : <strong className="muted">{t("nothingNext")}</strong>}</div></article>
+        <article className="focus-card next-card"><span className="focus-symbol">↗</span><div className="next-content"><span className="focus-label">{t("next")}</span>{nextActivity ? <strong>{nextActivity.symbol} {nextActivity.title}<small>{formatTime(activityInstant(nextActivity.startLocal, nextActivity.timeZone), locale, nextActivity.timeZone)}</small></strong> : <strong className="muted">{t("nothingNext")}</strong>}</div></article>
       </section>
 
       {error && <div className="error-banner" role="alert">{error}<button onClick={() => setError("")} aria-label={t("dismiss")}>×</button></div>}

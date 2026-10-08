@@ -61,6 +61,29 @@ describe("local-first foundation", () => {
     expect(localDateTime("2026-10-08", "08:30").getHours()).toBe(8);
   });
 
+  it("converts an activity using its stored IANA zone instead of the browser zone", () => {
+    const browserTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    const activityTimeZone = browserTimeZone === "Asia/Tokyo" ? "America/Los_Angeles" : "Asia/Tokyo";
+    const expectedInstant = activityTimeZone === "Asia/Tokyo" ? "2026-10-08T00:00:00.000Z" : "2026-10-08T16:00:00.000Z";
+    expect(localDateTime("2026-10-08", "09:00", activityTimeZone).toISOString()).toBe(expectedInstant);
+  });
+
+  it("converts across DST transitions and makes ambiguous fall-back time behavior explicit", () => {
+    const beforeSpringJump = localDateTime("2026-03-08", "01:30", "America/New_York");
+    const afterSpringJump = localDateTime("2026-03-08", "03:30", "America/New_York");
+    expect(beforeSpringJump.toISOString()).toBe("2026-03-08T06:30:00.000Z");
+    expect(afterSpringJump.toISOString()).toBe("2026-03-08T07:30:00.000Z");
+    expect(afterSpringJump.getTime() - beforeSpringJump.getTime()).toBe(60 * 60 * 1000);
+
+    const ambiguousEarlier = localDateTime("2026-11-01", "01:30", "America/New_York");
+    const ambiguousLater = localDateTime("2026-11-01", "01:30", "America/New_York", "later");
+    expect(ambiguousEarlier.toISOString()).toBe("2026-11-01T05:30:00.000Z");
+    expect(ambiguousLater.toISOString()).toBe("2026-11-01T06:30:00.000Z");
+
+    const skippedSpringTime = localDateTime("2026-03-08", "02:30", "America/New_York");
+    expect(skippedSpringTime.toISOString()).toBe("2026-03-08T07:30:00.000Z");
+  });
+
   it("rounds a local time forward to a 15-minute boundary", () => {
     expect(nearestQuarterHour(new Date(2026, 9, 8, 8, 1))).toBe("08:15");
     expect(nearestQuarterHour(new Date(2026, 9, 8, 8, 15))).toBe("08:15");

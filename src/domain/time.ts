@@ -1,4 +1,5 @@
 import type { Horizon } from "./model";
+import { Temporal } from "@js-temporal/polyfill";
 
 export function localDateKey(date: Date): string {
   const year = date.getFullYear();
@@ -7,8 +8,17 @@ export function localDateKey(date: Date): string {
   return `${year}-${month}-${day}`;
 }
 
-export function localDateTime(dateKey: string, time: string): Date {
-  return new Date(`${dateKey}T${time}:00`);
+export type LocalTimeDisambiguation = "compatible" | "earlier" | "later" | "reject";
+
+export function localDateTime(
+  dateKey: string,
+  time: string,
+  timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
+  disambiguation: LocalTimeDisambiguation = "compatible",
+): Date {
+  const plainDateTime = Temporal.PlainDateTime.from(`${dateKey}T${time}:00`);
+  const zonedDateTime = plainDateTime.toZonedDateTime(timeZone, { disambiguation });
+  return new Date(Number(zonedDateTime.epochMilliseconds));
 }
 
 export function nearestQuarterHour(date: Date): string {
@@ -50,6 +60,10 @@ export function horizonBounds(horizon: Horizon, anchor: Date): { start: Date; en
 
 export function activityDateKey(startLocal: string): string {
   return startLocal.slice(0, 10);
+}
+
+export function activityInstant(startLocal: string, timeZone: string): Date {
+  return localDateTime(activityDateKey(startLocal), startLocal.slice(11, 16), timeZone);
 }
 
 export function minutesIntoDay(startLocal: string): number {

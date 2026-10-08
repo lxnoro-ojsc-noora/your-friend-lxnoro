@@ -30,6 +30,6 @@ export function formatStarterTitle(locale: Locale, starterKey: string): string {
 export function formatDate(date: Date, locale: Locale, options: Intl.DateTimeFormatOptions = {}): string {
   return new Intl.DateTimeFormat(locale === "ar" ? "ar" : "en", { weekday: "long", month: "long", day: "numeric", year: "numeric", ...options }).format(date);
 }
-export function formatTime(date: Date, locale: Locale): string {
-  return new Intl.DateTimeFormat(locale === "ar" ? "ar" : "en", { hour: "numeric", minute: "2-digit" }).format(date);
+export function formatTime(date: Date, locale: Locale, timeZone?: string): string {
+  return new Intl.DateTimeFormat(locale === "ar" ? "ar" : "en", { hour: "numeric", minute: "2-digit", ...(timeZone ? { timeZone } : {}) }).format(date);
 }
