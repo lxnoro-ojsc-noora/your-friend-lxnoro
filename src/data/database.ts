@@ -1,5 +1,6 @@
 import Dexie, { type Table } from "dexie";
 import { createStarterTypes } from "./catalog";
+import type { BookingSyncOutboxRecord } from "./bookingSync";
 import type { ActivityType, Locale, Preferences, ReminderLedgerEntry, ScheduledActivity } from "../domain/model";
 
 export class LxnoroDatabase extends Dexie {
@@ -7,6 +8,7 @@ export class LxnoroDatabase extends Dexie {
   activities!: Table<ScheduledActivity, string>;
   preferences!: Table<Preferences, string>;
   reminderLedger!: Table<ReminderLedgerEntry, string>;
+  bookingSyncOutbox!: Table<BookingSyncOutboxRecord, string>;
 
   constructor(name = "your-friend-lxnoro") {
     super(name);
@@ -15,6 +17,13 @@ export class LxnoroDatabase extends Dexie {
       activities: "id, typeId, startLocal, status",
       preferences: "id",
       reminderLedger: "activityId, dueAt",
+    });
+    this.version(3).stores({
+      activityTypes: "id, starterKey, createdAt",
+      activities: "id, typeId, startLocal, status",
+      preferences: "id",
+      reminderLedger: "activityId, dueAt",
+      bookingSyncOutbox: "id",
     });
   }
 }
