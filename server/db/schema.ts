@@ -12,6 +12,12 @@ export function initializeBookingSchema(db: Database.Database): void {
       PRIMARY KEY (owner_id, start_utc, end_utc),
       CHECK (start_utc < end_utc)
     ) STRICT;
+
+    CREATE TABLE IF NOT EXISTS booking_projection_state (
+      owner_id TEXT PRIMARY KEY NOT NULL,
+      source_revision INTEGER NOT NULL CHECK (source_revision > 0),
+      updated_at TEXT NOT NULL CHECK (substr(updated_at, -1, 1) = 'Z')
+    ) STRICT;
   `);
 }
 
