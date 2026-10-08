@@ -1,6 +1,6 @@
 ﻿---
 doc: scope
-status: draft
+status: approved
 ---
 
 # Your friend LXNORO
