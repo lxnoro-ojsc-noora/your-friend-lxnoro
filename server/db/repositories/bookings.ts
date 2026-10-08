@@ -1,9 +1,15 @@
-import { createHash, randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import Database from "better-sqlite3";
+import { cancelBookingReminderJobsForRequest, insertBookingReminderJobsForPendingRequest } from "./bookingReminders";
 import {
   parseBookingLinkId,
+  isBookingProjectionFresh,
+  validateBookingAlternative,
   validateAvailabilityConfiguration,
   validateBookingRequestSubmission,
+  respondToBookingAlternative as applyAlternativeResponse,
+  type BookingAlternativeInput,
+  type BookingAlternativeProposal,
   type BookingLinkId,
   type BookingRequestSubmission,
   type BookingRequestStatus,
@@ -36,6 +42,12 @@ export interface ConfirmedAppointmentProjection {
   timeZone: string;
 }
 
+export interface CreatedBookingAlternative {
+  proposal: BookingAlternativeProposal;
+  /** Returned to the requester once; only its hash is persisted. */
+  responseKey: string;
+}
+
 export class BookingRequestConflictError extends Error {
   readonly code = "booking_conflict";
 }
@@ -48,6 +60,22 @@ export class BookingLinkOwnershipError extends Error {
   readonly code = "booking_link_owner_mismatch";
 }
 
+export class BookingAlternativeNotFoundError extends Error {
+  readonly code = "booking_alternative_not_found";
+}
+
+export class BookingAlternativeConflictError extends Error {
+  readonly code = "booking_alternative_state_conflict";
+}
+
+export class BookingProjectionUnavailableError extends Error {
+  readonly code = "booking_projection_unavailable";
+}
+
+export class BookingProjectionStaleError extends Error {
+  readonly code = "booking_projection_stale";
+}
+
 function tokenHash(linkId: BookingLinkId | string): string {
   const validId = parseBookingLinkId(linkId);
   return createHash("sha256").update(validId, "utf8").digest("hex");
@@ -56,6 +84,32 @@ function tokenHash(linkId: BookingLinkId | string): string {
 function utcNow(now: Date): string {
   if (!Number.isFinite(now.getTime())) throw new RangeError("Current time is invalid");
   return now.toISOString();
+}
+
+function createAlternativeResponseKey(): string {
+  return randomBytes(24).toString("base64url");
+}
+
+function alternativeKeyHash(key: string): string {
+  if (!/^[A-Za-z0-9_-]{32}$/.test(key)) throw new BookingAlternativeNotFoundError("Alternative response was not found");
+  return createHash("sha256").update(key, "utf8").digest("hex");
+}
+
+function mapAlternative(row: Record<string, unknown>): BookingAlternativeProposal {
+  return {
+    id: row.proposal_id as string,
+    requestId: row.request_id as string,
+    proposedDate: row.proposed_date as string,
+    proposedStartTime: row.proposed_start_local as string,
+    startUtc: row.start_utc as string,
+    endUtc: row.end_utc as string,
+    durationMinutes: row.duration_minutes as number,
+    timeZone: row.time_zone as string,
+    status: row.status as BookingAlternativeProposal["status"],
+    createdAtUtc: row.created_at_utc as string,
+    ...(row.responded_at_utc === null ? {} : { respondedAtUtc: row.responded_at_utc as string }),
+    ...(Number.isSafeInteger(row.confirmed_projection_revision) ? { confirmedProjectionRevision: row.confirmed_projection_revision as number } : {}),
+  };
 }
 
 function readConfiguration(db: Database.Database, hash: string, linkId: BookingLinkId): OwnerAvailabilityConfiguration | undefined {
@@ -230,6 +284,7 @@ export function createPendingBookingRequest(
     `).run(id, hash, link.owner_id, submission.requesterName.trim(), submission.requesterEmail.trim(),
       submission.requesterNote ?? null, submission.requestedStartUtc, submission.requestedEndUtc,
       submission.durationMinutes, createdAtUtc, createdAtUtc);
+    insertBookingReminderJobsForPendingRequest(db, id, now);
     return mapRequest(db.prepare("SELECT * FROM booking_requests WHERE request_id = ?").get(id) as Record<string, unknown>);
   });
   return create.immediate();
@@ -240,6 +295,170 @@ export function listOwnerBookingRequests(db: Database.Database, ownerId: string,
     ? db.prepare("SELECT * FROM booking_requests WHERE owner_id = ? AND status = ? ORDER BY requested_start_utc").all(ownerId, status)
     : db.prepare("SELECT * FROM booking_requests WHERE owner_id = ? ORDER BY requested_start_utc").all(ownerId);
   return (rows as Array<Record<string, unknown>>).map(mapRequest);
+}
+
+/** Save one owner-proposed alternative while preserving the original request and proposal history. */
+export function createBookingAlternativeProposal(
+  db: Database.Database,
+  ownerId: string,
+  requestId: string,
+  input: BookingAlternativeInput,
+  now = new Date(),
+): CreatedBookingAlternative {
+  if (!ownerId.trim() || ownerId.length > 128) throw new RangeError("Owner identity is invalid");
+  const timestamp = utcNow(now);
+  const responseKey = createAlternativeResponseKey();
+  const responseKeyHash = alternativeKeyHash(responseKey);
+  const proposalId = randomUUID();
+  const create = db.transaction(() => {
+    const request = db.prepare("SELECT * FROM booking_requests WHERE request_id = ? AND owner_id = ?")
+      .get(requestId, ownerId) as Record<string, unknown> | undefined;
+    if (!request) throw new BookingRequestNotFoundError("Booking request was not found");
+    if (request.status !== "pending") throw new RangeError("Only pending booking requests can receive an alternative");
+    const linkHash = request.link_id_hash as string;
+    const configuration = readConfiguration(db, linkHash, "" as BookingLinkId);
+    if (!configuration) throw new BookingRequestNotFoundError("Booking policy was not found");
+    const interval = validateBookingAlternative(input, {
+      requesterName: request.requester_name as string,
+      requesterEmail: request.requester_email as string,
+      ...(request.requester_note === null ? {} : { requesterNote: request.requester_note as string }),
+    }, configuration, now);
+    const prior = db.prepare("SELECT 1 FROM booking_alternative_proposals WHERE request_id = ? AND status IN ('proposed', 'accepted') LIMIT 1")
+      .get(requestId);
+    if (prior) throw new BookingAlternativeConflictError("An alternative is already awaiting response or finalization");
+    db.prepare(`
+      INSERT INTO booking_alternative_proposals
+        (proposal_id, request_id, response_key_hash, proposed_date, proposed_start_local,
+         start_utc, end_utc, duration_minutes, time_zone, status, created_at_utc, responded_at_utc)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'proposed', ?, NULL)
+    `).run(proposalId, requestId, responseKeyHash, interval.proposedDate, interval.proposedStartTime,
+      interval.startUtc, interval.endUtc, interval.durationMinutes, interval.timeZone, timestamp);
+    const row = db.prepare("SELECT * FROM booking_alternative_proposals WHERE proposal_id = ?").get(proposalId) as Record<string, unknown>;
+    return mapAlternative(row);
+  });
+  return { proposal: create.immediate(), responseKey };
+}
+
+/** Owner history contains proposal data only; no requester or private schedule details are joined. */
+export function listBookingAlternativeProposals(
+  db: Database.Database,
+  ownerId: string,
+  requestId: string,
+): BookingAlternativeProposal[] {
+  const rows = db.prepare(`
+    SELECT proposal.* FROM booking_alternative_proposals AS proposal
+    JOIN booking_requests AS request ON request.request_id = proposal.request_id
+    WHERE request.owner_id = ? AND request.request_id = ?
+    ORDER BY proposal.created_at_utc, proposal.proposal_id
+  `).all(ownerId, requestId) as Array<Record<string, unknown>>;
+  return rows.map(mapAlternative);
+}
+
+/** Record an explicit requester decision; replay with the same response key/decision is idempotent. */
+export function recordBookingAlternativeResponse(
+  db: Database.Database,
+  responseKey: string,
+  decision: "accepted" | "rejected",
+  now = new Date(),
+): BookingAlternativeProposal {
+  const hash = alternativeKeyHash(responseKey);
+  const timestamp = utcNow(now);
+  const respond = db.transaction(() => {
+    const row = db.prepare(`
+      SELECT proposal.*, request.status AS request_status
+      FROM booking_alternative_proposals AS proposal
+      JOIN booking_requests AS request ON request.request_id = proposal.request_id
+      WHERE proposal.response_key_hash = ?
+    `)
+      .get(hash) as Record<string, unknown> | undefined;
+    if (!row) throw new BookingAlternativeNotFoundError("Alternative response was not found");
+    const proposal = mapAlternative(row);
+    if (proposal.status === decision) return proposal;
+    if (proposal.status !== "proposed") throw new BookingAlternativeConflictError("Alternative already has a different final state");
+    if (row.request_status !== "pending") throw new BookingAlternativeConflictError("The original booking request is no longer pending");
+    const updated = applyAlternativeResponse(proposal, decision, timestamp);
+    db.prepare("UPDATE booking_alternative_proposals SET status = ?, responded_at_utc = ? WHERE proposal_id = ? AND status = 'proposed'")
+      .run(updated.status, timestamp, proposal.id);
+    return updated;
+  });
+  return respond.immediate();
+}
+
+export interface AcceptedBookingAlternative {
+  proposal: BookingAlternativeProposal;
+  requestId: string;
+  projectionRevision: number;
+}
+
+/** Finalize acceptance against the current synchronized interval snapshot in one write transaction. */
+export function acceptBookingAlternativeAndConfirm(
+  db: Database.Database,
+  responseKey: string,
+  now = new Date(),
+): AcceptedBookingAlternative {
+  const hash = alternativeKeyHash(responseKey);
+  const timestamp = utcNow(now);
+  const accept = db.transaction((): AcceptedBookingAlternative => {
+    const row = db.prepare(`
+      SELECT proposal.*, request.request_id AS parent_request_id, request.owner_id, request.status AS request_status,
+        request.link_id_hash, link.expires_at_utc, availability.buffer_before_minutes,
+        availability.buffer_after_minutes, availability.time_zone AS owner_time_zone,
+        projection.source_revision, projection.updated_at AS projection_updated_at
+      FROM booking_alternative_proposals AS proposal
+      JOIN booking_requests AS request ON request.request_id = proposal.request_id
+      JOIN booking_links AS link ON link.link_id_hash = request.link_id_hash
+      JOIN booking_availability AS availability ON availability.link_id_hash = request.link_id_hash
+      LEFT JOIN booking_projection_state AS projection ON projection.owner_id = request.owner_id
+      WHERE proposal.response_key_hash = ?
+    `).get(hash) as Record<string, unknown> | undefined;
+    if (!row) throw new BookingAlternativeNotFoundError("Alternative response was not found");
+    const proposal = mapAlternative(row);
+    if (proposal.status !== "proposed") throw new BookingAlternativeConflictError("Alternative already has a final state");
+    if (row.request_status !== "pending") throw new BookingAlternativeConflictError("The original booking request is no longer pending");
+    if (Date.parse(proposal.startUtc) <= now.getTime() ||
+        (row.expires_at_utc !== null && Date.parse(row.expires_at_utc as string) <= now.getTime())) {
+      throw new BookingAlternativeConflictError("Alternative has expired");
+    }
+    const revision = row.source_revision;
+    const updatedAt = row.projection_updated_at;
+    if (!Number.isSafeInteger(revision) || (revision as number) <= 0 || typeof updatedAt !== "string") {
+      throw new BookingProjectionUnavailableError("No synchronized owner booking projection is available");
+    }
+    if (!isBookingProjectionFresh(updatedAt, now)) {
+      throw new BookingProjectionStaleError("The owner booking projection is stale");
+    }
+    if (proposal.timeZone !== row.owner_time_zone) {
+      throw new BookingAlternativeConflictError("Alternative timezone no longer matches booking policy");
+    }
+    if (hasConflict(db, row.owner_id as string, proposal.startUtc, proposal.endUtc,
+      row.buffer_before_minutes as number, row.buffer_after_minutes as number, row.parent_request_id as string)) {
+      throw new BookingRequestConflictError("Alternative time is no longer available");
+    }
+
+    db.prepare(`
+      UPDATE booking_alternative_proposals
+      SET status = 'accepted', responded_at_utc = ?, confirmed_projection_revision = ?
+      WHERE proposal_id = ? AND status = 'proposed'
+    `).run(timestamp, revision, proposal.id);
+    db.prepare(`
+      INSERT INTO confirmed_appointments
+        (appointment_id, request_id, owner_id, start_utc, end_utc, duration_minutes, time_zone, created_at_utc)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(randomUUID(), row.parent_request_id, row.owner_id, proposal.startUtc, proposal.endUtc,
+      proposal.durationMinutes, proposal.timeZone, timestamp);
+    db.prepare(`
+      INSERT INTO booking_email_deliveries
+        (delivery_id, request_id, status, attempt_count, next_attempt_at_utc, created_at_utc, updated_at_utc)
+      VALUES (?, ?, 'pending', 0, ?, ?, ?)
+    `).run(randomUUID(), row.parent_request_id, timestamp, timestamp, timestamp);
+    db.prepare("UPDATE booking_requests SET status = 'approved', updated_at_utc = ? WHERE request_id = ? AND status = 'pending'")
+      .run(timestamp, row.parent_request_id);
+    cancelBookingReminderJobsForRequest(db, row.parent_request_id as string);
+    const acceptedRow = db.prepare("SELECT * FROM booking_alternative_proposals WHERE proposal_id = ?")
+      .get(proposal.id) as Record<string, unknown>;
+    return { proposal: mapAlternative(acceptedRow), requestId: row.parent_request_id as string, projectionRevision: revision as number };
+  });
+  return accept.immediate();
 }
 
 /** Atomically decide a pending request; approval rechecks current busy/confirmed/pending intervals. */
@@ -278,6 +497,7 @@ export function decideOwnerBookingRequest(
     }
     db.prepare("UPDATE booking_requests SET status = ?, updated_at_utc = ? WHERE request_id = ? AND status = 'pending'")
       .run(decision, timestamp, requestId);
+    cancelBookingReminderJobsForRequest(db, requestId);
     return mapRequest(db.prepare("SELECT * FROM booking_requests WHERE request_id = ?").get(requestId) as Record<string, unknown>);
   });
   return decide.immediate();

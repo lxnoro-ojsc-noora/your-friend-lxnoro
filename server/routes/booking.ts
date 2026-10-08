@@ -1,5 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import Database from "better-sqlite3";
+import { createHash } from "node:crypto";
 import { Temporal } from "@js-temporal/polyfill";
 import type { BookingEmailDispatcher } from "../email/bookingConfirmation";
 import { getBookingEmailDeliveryState, type BookingEmailDeliveryState } from "../db/repositories/bookingEmails";
@@ -12,8 +13,14 @@ import {
 } from "../../src/domain/booking";
 import {
   BookingLinkOwnershipError,
+  BookingAlternativeConflictError,
+  BookingAlternativeNotFoundError,
+  BookingProjectionStaleError,
+  BookingProjectionUnavailableError,
   BookingRequestConflictError,
   BookingRequestNotFoundError,
+  createBookingAlternativeProposal,
+  acceptBookingAlternativeAndConfirm,
   createPendingBookingRequest,
   decideOwnerBookingRequest,
   getBookingLinkContext,
@@ -21,6 +28,7 @@ import {
   isBookingTimeAvailable,
   listConfirmedAppointmentProjections,
   listOwnerBookingRequests,
+  recordBookingAlternativeResponse,
   saveBookingLinkConfiguration,
 } from "../db/repositories/bookings";
 
@@ -292,6 +300,105 @@ export function registerBookingRoutes(app: FastifyInstance, db: Database.Databas
       if (error instanceof RangeError) return reply.code(409).send({ code: "booking_request_not_pending" });
       request.log.error({ err: error }, "Booking request decision failed");
       return reply.code(500).send({ code: "booking_decision_failed" });
+    }
+  });
+
+  app.post<{ Params: { requestId: string } }>("/api/owner/booking/requests/:requestId/alternatives", async (request, reply) => {
+    const ownerId = ownerIdFromRequest(request, reply, options.developmentAuth);
+    if (!ownerId) return;
+    if (!/^[0-9a-f-]{36}$/i.test(request.params.requestId) || !isRecord(request.body) ||
+        !hasOnlyKeys(request.body, ["proposedDate", "proposedStartTime", "durationMinutes", "timeZone"]) ||
+        typeof request.body.proposedDate !== "string" || typeof request.body.proposedStartTime !== "string" ||
+        !Number.isSafeInteger(request.body.durationMinutes) || typeof request.body.timeZone !== "string") {
+      return reply.code(400).send({ code: "invalid_booking_alternative" });
+    }
+    try {
+      const created = createBookingAlternativeProposal(db, ownerId, request.params.requestId, {
+        proposedDate: request.body.proposedDate,
+        proposedStartTime: request.body.proposedStartTime,
+        durationMinutes: request.body.durationMinutes as number,
+        timeZone: request.body.timeZone,
+      }, now());
+      return reply.code(201).send({
+        proposalId: created.proposal.id,
+        proposedDate: created.proposal.proposedDate,
+        proposedStartTime: created.proposal.proposedStartTime,
+        startUtc: created.proposal.startUtc,
+        endUtc: created.proposal.endUtc,
+        durationMinutes: created.proposal.durationMinutes,
+        timeZone: created.proposal.timeZone,
+        status: created.proposal.status,
+        createdAtUtc: created.proposal.createdAtUtc,
+        responseKey: created.responseKey,
+      });
+    } catch (error) {
+      if (error instanceof BookingRequestNotFoundError) return reply.code(404).send({ code: error.code });
+      if (error instanceof BookingAlternativeConflictError) return reply.code(409).send({ code: error.code });
+      if (error instanceof RangeError || error instanceof TypeError) return reply.code(400).send({ code: "invalid_booking_alternative" });
+      request.log.error({ err: error }, "Booking alternative creation failed");
+      return reply.code(500).send({ code: "booking_alternative_failed" });
+    }
+  });
+
+  app.post<{ Params: { responseKey: string } }>("/api/public/booking/alternatives/:responseKey/response", async (request, reply) => {
+    if (!/^[A-Za-z0-9_-]{32}$/.test(request.params.responseKey) || !isRecord(request.body) ||
+        !hasOnlyKeys(request.body, ["decision"]) ||
+        (request.body.decision !== "accept" && request.body.decision !== "reject")) {
+      return reply.code(404).send({ code: "alternative_unavailable" });
+    }
+    const responseKeyHash = createHash("sha256").update(request.params.responseKey, "utf8").digest("hex");
+    const row = db.prepare(`
+      SELECT proposal.proposal_id, proposal.request_id, proposal.start_utc, proposal.end_utc,
+        proposal.proposed_date, proposal.proposed_start_local, proposal.duration_minutes,
+        proposal.time_zone, proposal.status AS proposal_status, request.status AS request_status,
+        link.expires_at_utc
+      FROM booking_alternative_proposals AS proposal
+      JOIN booking_requests AS request ON request.request_id = proposal.request_id
+      JOIN booking_links AS link ON link.link_id_hash = request.link_id_hash
+      WHERE proposal.response_key_hash = ?
+    `).get(responseKeyHash) as {
+      proposal_id: string; request_id: string; start_utc: string; end_utc: string;
+      proposed_date: string; proposed_start_local: string; duration_minutes: number;
+      time_zone: string; proposal_status: string; request_status: string; expires_at_utc: string | null;
+    } | undefined;
+    if (!row) return reply.code(404).send({ code: "alternative_unavailable" });
+    if (row.proposal_status !== "proposed") return reply.code(409).send({ code: "alternative_already_responded" });
+    if (row.request_status !== "pending") return reply.code(409).send({ code: "booking_request_finalized" });
+    if (Date.parse(row.start_utc) <= now().getTime() ||
+        (row.expires_at_utc !== null && Date.parse(row.expires_at_utc) <= now().getTime())) {
+      return reply.code(410).send({ code: "alternative_expired" });
+    }
+    try {
+      if (request.body.decision === "accept") {
+        const accepted = acceptBookingAlternativeAndConfirm(db, request.params.responseKey, now());
+        try { await options.emailDispatcher?.deliverRequestNow(accepted.requestId); } catch {
+          // Confirmation is committed independently of confirmation-email delivery.
+        }
+        return reply.send({
+          status: accepted.proposal.status,
+          proposedDate: accepted.proposal.proposedDate,
+          proposedStartTime: accepted.proposal.proposedStartTime,
+          durationMinutes: accepted.proposal.durationMinutes,
+          timeZone: accepted.proposal.timeZone,
+        });
+      }
+      const result = recordBookingAlternativeResponse(db, request.params.responseKey, "rejected", now());
+      // The response contains proposal data only; no owner/request database IDs or schedule content.
+      return reply.send({
+        status: result.status,
+        proposedDate: result.proposedDate,
+        proposedStartTime: result.proposedStartTime,
+        durationMinutes: result.durationMinutes,
+        timeZone: result.timeZone,
+      });
+    } catch (error) {
+      if (error instanceof BookingAlternativeNotFoundError) return reply.code(404).send({ code: "alternative_unavailable" });
+      if (error instanceof BookingAlternativeConflictError) return reply.code(409).send({ code: "alternative_unavailable" });
+      if (error instanceof BookingProjectionUnavailableError) return reply.code(409).send({ code: error.code });
+      if (error instanceof BookingProjectionStaleError) return reply.code(409).send({ code: error.code });
+      if (error instanceof BookingRequestConflictError) return reply.code(409).send({ code: "slot_unavailable" });
+      request.log.error({ err: error }, "Booking alternative response failed");
+      return reply.code(500).send({ code: "alternative_response_failed" });
     }
   });
 

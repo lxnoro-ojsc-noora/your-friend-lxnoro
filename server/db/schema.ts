@@ -72,6 +72,28 @@ export function initializeBookingSchema(db: Database.Database): void {
     CREATE INDEX IF NOT EXISTS booking_requests_owner_status_time
       ON booking_requests(owner_id, status, requested_start_utc);
 
+    CREATE TABLE IF NOT EXISTS booking_alternative_proposals (
+      proposal_id TEXT PRIMARY KEY NOT NULL,
+      request_id TEXT NOT NULL REFERENCES booking_requests(request_id),
+      response_key_hash TEXT NOT NULL UNIQUE CHECK (length(response_key_hash) = 64),
+      proposed_date TEXT NOT NULL CHECK (length(proposed_date) = 10),
+      proposed_start_local TEXT NOT NULL CHECK (length(proposed_start_local) = 5),
+      start_utc TEXT NOT NULL CHECK (substr(start_utc, -1, 1) = 'Z'),
+      end_utc TEXT NOT NULL CHECK (substr(end_utc, -1, 1) = 'Z'),
+      duration_minutes INTEGER NOT NULL CHECK (duration_minutes > 0),
+      time_zone TEXT NOT NULL,
+      status TEXT NOT NULL CHECK (status IN ('proposed', 'accepted', 'rejected', 'unavailable')),
+      confirmed_projection_revision INTEGER CHECK (confirmed_projection_revision IS NULL OR confirmed_projection_revision > 0),
+      created_at_utc TEXT NOT NULL CHECK (substr(created_at_utc, -1, 1) = 'Z'),
+      responded_at_utc TEXT CHECK (responded_at_utc IS NULL OR substr(responded_at_utc, -1, 1) = 'Z'),
+      CHECK (start_utc < end_utc),
+      CHECK ((status = 'proposed' AND responded_at_utc IS NULL) OR (status != 'proposed' AND responded_at_utc IS NOT NULL))
+    ) STRICT;
+    CREATE INDEX IF NOT EXISTS booking_alternatives_request_history
+      ON booking_alternative_proposals(request_id, created_at_utc, proposal_id);
+    CREATE UNIQUE INDEX IF NOT EXISTS booking_alternatives_one_open_per_request
+      ON booking_alternative_proposals(request_id) WHERE status IN ('proposed', 'accepted');
+
     CREATE TABLE IF NOT EXISTS confirmed_appointments (
       appointment_id TEXT PRIMARY KEY NOT NULL,
       request_id TEXT NOT NULL UNIQUE REFERENCES booking_requests(request_id),
@@ -101,6 +123,35 @@ export function initializeBookingSchema(db: Database.Database): void {
     ) STRICT;
     CREATE INDEX IF NOT EXISTS booking_email_due
       ON booking_email_deliveries(status, next_attempt_at_utc, lease_until_utc);
+
+    CREATE TABLE IF NOT EXISTS booking_reminder_preferences (
+      owner_id TEXT PRIMARY KEY NOT NULL,
+      quiet_start_local TEXT,
+      quiet_end_local TEXT,
+      CHECK ((quiet_start_local IS NULL AND quiet_end_local IS NULL) OR
+        (quiet_start_local IS NOT NULL AND quiet_end_local IS NOT NULL)),
+      CHECK (quiet_start_local IS NULL OR (quiet_start_local GLOB '[0-1][0-9]:[0-5][0-9]' OR quiet_start_local GLOB '2[0-3]:[0-5][0-9]')),
+      CHECK (quiet_end_local IS NULL OR (quiet_end_local GLOB '[0-1][0-9]:[0-5][0-9]' OR quiet_end_local GLOB '2[0-3]:[0-5][0-9]'))
+    ) STRICT;
+
+    CREATE TABLE IF NOT EXISTS booking_reminder_jobs (
+      reminder_id TEXT PRIMARY KEY NOT NULL,
+      request_id TEXT NOT NULL REFERENCES booking_requests(request_id),
+      owner_id TEXT NOT NULL,
+      cadence TEXT NOT NULL CHECK (cadence IN ('same_day', '24_hour', 'three_hour_follow_up')),
+      idempotency_key TEXT NOT NULL UNIQUE,
+      due_at_utc TEXT NOT NULL CHECK (substr(due_at_utc, -1, 1) = 'Z'),
+      status TEXT NOT NULL CHECK (status IN ('pending', 'processing', 'completed', 'cancelled')),
+      lease_token TEXT,
+      lease_until_utc TEXT CHECK (lease_until_utc IS NULL OR substr(lease_until_utc, -1, 1) = 'Z'),
+      created_at_utc TEXT NOT NULL CHECK (substr(created_at_utc, -1, 1) = 'Z'),
+      completed_at_utc TEXT CHECK (completed_at_utc IS NULL OR substr(completed_at_utc, -1, 1) = 'Z'),
+      UNIQUE (request_id, cadence, idempotency_key)
+    ) STRICT;
+    CREATE INDEX IF NOT EXISTS booking_reminder_due
+      ON booking_reminder_jobs(status, due_at_utc, lease_until_utc);
+    CREATE INDEX IF NOT EXISTS booking_reminder_owner_due
+      ON booking_reminder_jobs(owner_id, status, due_at_utc);
   `);
 
   const appointmentColumns = db.prepare("PRAGMA table_info(confirmed_appointments)").all() as Array<{ name: string }>;
@@ -115,6 +166,11 @@ export function initializeBookingSchema(db: Database.Database): void {
         WHERE request.request_id = confirmed_appointments.request_id
       )
     `);
+  }
+
+  const alternativeColumns = db.prepare("PRAGMA table_info(booking_alternative_proposals)").all() as Array<{ name: string }>;
+  if (!alternativeColumns.some(({ name }) => name === "confirmed_projection_revision")) {
+    db.exec("ALTER TABLE booking_alternative_proposals ADD COLUMN confirmed_projection_revision INTEGER CHECK (confirmed_projection_revision IS NULL OR confirmed_projection_revision > 0)");
   }
 }
 

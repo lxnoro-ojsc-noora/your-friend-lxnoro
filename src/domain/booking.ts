@@ -1,3 +1,5 @@
+import { Temporal } from "@js-temporal/polyfill";
+
 /** Network booking records deliberately contain no private schedule/activity fields. */
 export type BookingRequestStatus = "pending" | "approved" | "rejected";
 
@@ -44,6 +46,42 @@ export interface BookingRequestSubmission {
   requestedStartUtc: string;
   requestedEndUtc: string;
   durationMinutes: number;
+}
+
+export type AlternativeProposalStatus = "proposed" | "accepted" | "rejected" | "unavailable";
+
+/** A server-published booking projection is fresh for five minutes after atomic publication. */
+export const BOOKING_PROJECTION_FRESHNESS_MS = 5 * 60_000;
+
+/** The shared booking server considers an atomically published owner snapshot current for five minutes. */
+export function isBookingProjectionFresh(updatedAt: string, now: Date): boolean {
+  const updatedMs = Date.parse(updatedAt);
+  return Number.isFinite(updatedMs) && new Date(updatedMs).toISOString() === updatedAt &&
+    updatedMs <= now.getTime() && now.getTime() - updatedMs <= BOOKING_PROJECTION_FRESHNESS_MS;
+}
+
+/** Owner-authored alternative, in its IANA zone and as exact UTC instants. */
+export interface BookingAlternativeProposal {
+  id: string;
+  requestId: string;
+  proposedDate: string;
+  proposedStartTime: string;
+  startUtc: string;
+  endUtc: string;
+  durationMinutes: number;
+  timeZone: string;
+  status: AlternativeProposalStatus;
+  createdAtUtc: string;
+  respondedAtUtc?: string;
+  /** Existing server projection revision used for accepted/finalized alternatives. */
+  confirmedProjectionRevision?: number;
+}
+
+export interface BookingAlternativeInput {
+  proposedDate: string;
+  proposedStartTime: string;
+  durationMinutes: number;
+  timeZone: string;
 }
 
 const UTC_INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
@@ -129,6 +167,54 @@ export function validateBookingRequestSubmission(
   if (configuration.maximumAdvanceMinutes !== undefined && start - nowMs > configuration.maximumAdvanceMinutes * 60_000) {
     throw new RangeError("Requested time exceeds the booking advance window");
   }
+}
+
+/** Converts an owner-entered local alternative into a validated UTC booking interval. */
+export function validateBookingAlternative(
+  input: BookingAlternativeInput,
+  requester: Pick<BookingRequestSubmission, "requesterName" | "requesterEmail" | "requesterNote">,
+  configuration: OwnerAvailabilityConfiguration,
+  now: Date = new Date(),
+): Pick<BookingAlternativeProposal, "proposedDate" | "proposedStartTime" | "startUtc" | "endUtc" | "durationMinutes" | "timeZone"> {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(input.proposedDate) || !LOCAL_TIME.test(input.proposedStartTime)) {
+    throw new RangeError("Alternative date and start time must be valid local values");
+  }
+  let start: Temporal.Instant;
+  try {
+    const date = Temporal.PlainDate.from(input.proposedDate);
+    if (date.toString() !== input.proposedDate) throw new RangeError("Alternative date is invalid");
+    if (input.timeZone !== configuration.timeZone) throw new RangeError("Alternative must use the configured owner time zone");
+    start = Temporal.PlainDateTime.from(`${input.proposedDate}T${input.proposedStartTime}`)
+      .toZonedDateTime(input.timeZone, { disambiguation: "reject" }).toInstant();
+  } catch (error) {
+    if (error instanceof RangeError) throw error;
+    throw new RangeError("Alternative local date/time or time zone is invalid");
+  }
+  if (!Number.isSafeInteger(input.durationMinutes) || input.durationMinutes <= 0) {
+    throw new RangeError("Alternative duration must be a positive whole number of minutes");
+  }
+  const end = start.add({ minutes: input.durationMinutes });
+  const startUtc = start.toString({ fractionalSecondDigits: 3 });
+  const endUtc = end.toString({ fractionalSecondDigits: 3 });
+  validateBookingRequestSubmission({
+    ...requester,
+    requestedStartUtc: startUtc,
+    requestedEndUtc: endUtc,
+    durationMinutes: input.durationMinutes,
+  }, configuration, now);
+  return { ...input, startUtc, endUtc };
+}
+
+/** Keeps an alternative response terminal and safe to replay with the same decision. */
+export function respondToBookingAlternative(
+  proposal: BookingAlternativeProposal,
+  decision: "accepted" | "rejected",
+  respondedAtUtc: string,
+): BookingAlternativeProposal {
+  if (!validUtcInstant(respondedAtUtc)) throw new RangeError("Alternative response time must be a canonical UTC instant");
+  if (proposal.status === decision) return proposal;
+  if (proposal.status !== "proposed") throw new RangeError("Alternative proposal already has a different final state");
+  return { ...proposal, status: decision, respondedAtUtc };
 }
 
 /** Only the owner may explicitly transition a Pending request; terminal states cannot be reopened. */
