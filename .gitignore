@@ -7,3 +7,7 @@ dist/
 .npm-cache/
 .test-dist/
 .data/
+.agents/
+.claude/
+agent/
+skills-lock.json
