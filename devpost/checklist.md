@@ -29,7 +29,7 @@ Build mode: fast
   Learner check: Create a timed activity with a long note, collapse it, let it become due, and verify the reminder gives enough information to act and completion updates the schedule.
   Commit: `Add task notes and Micro-Bot reminders`
 
-- [ ] **3. The local time model safely connects to LXNORO's booking boundary**
+- [x] **3. The local time model safely connects to LXNORO's booking boundary**
   Becomes usable: A private scheduled activity produces only anonymous, coalesced busy time intervals for the LXNORO booking service. The server persists those intervals and can reject an overlapping booking operation; the local schedule, labels, notes, and activity identities remain on device. The owner can see projection sync status.
   Why now: This is the highest-risk boundary between the local time model and network booking. Validate its data contract, timezone representation, privacy, and conflict behavior before adding more recurrence and horizon complexity.
   PRD ref: `prd.md > Time horizons and shared schedule model`, `prd.md > Shared Scheduling and Appointment Booking`, `prd.md > Localization, privacy, offline behavior, and AI boundaries`
