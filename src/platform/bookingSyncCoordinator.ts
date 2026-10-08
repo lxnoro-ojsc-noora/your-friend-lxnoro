@@ -1,8 +1,8 @@
-import { getBookingSyncSnapshot, markBookingSnapshotSynced, replacePendingBookingSnapshot } from "../data/bookingSync";
+import { acceptNewerServerBookingSnapshot, getBookingSyncSnapshot, markBookingSnapshotSynced, replacePendingBookingSnapshot } from "../data/bookingSync";
 import { database, type LxnoroDatabase } from "../data/database";
 import { createBookingProjectionV1 } from "../domain/bookingProjection";
 import { horizonBounds } from "../domain/time";
-import { publishBookingProjection } from "./bookingApi";
+import { fetchBookingProjectionSnapshot, publishBookingProjection } from "./bookingApi";
 
 export interface BookingSyncCoordinatorOptions {
   db?: LxnoroDatabase;
@@ -30,11 +30,11 @@ export class BookingSyncCoordinator {
     this.now = options.now ?? (() => new Date());
   }
 
-  start(): void {
-    if (this.started) return;
+  start(): Promise<void> {
+    if (this.started) return this.serial;
     this.started = true;
     this.eventTarget.addEventListener("online", this.handleOnline);
-    void this.refreshProjection();
+    return this.refreshProjection(true);
   }
 
   stop(): void {
@@ -45,18 +45,34 @@ export class BookingSyncCoordinator {
 
   /** Called only after a local activity write succeeds; network errors are swallowed. */
   projectionChanged(): Promise<void> {
-    return this.refreshProjection();
+    return this.refreshProjection(false);
   }
 
   private readonly handleOnline = (): void => {
-    void this.refreshProjection();
+    void this.refreshProjection(true);
   };
 
-  private refreshProjection(): Promise<void> {
+  private refreshProjection(refreshServer: boolean): Promise<void> {
     this.serial = this.serial.then(async () => {
-      const activities = await this.db.activities.toArray();
       const previous = await getBookingSyncSnapshot(this.db);
-      const revision = (previous?.revision ?? 0) + 1;
+      let serverRevision: number | undefined;
+      if (refreshServer && this.options.developmentOwnerId && this.isOnline()) {
+        try {
+          const serverSnapshot = await fetchBookingProjectionSnapshot({
+            developmentOwnerId: this.options.developmentOwnerId,
+            endpoint: this.options.endpoint,
+            fetchImpl: this.options.fetchImpl,
+          });
+          serverRevision = serverSnapshot.revision;
+          const accepted = await acceptNewerServerBookingSnapshot(serverSnapshot, this.db);
+          if (accepted) return;
+        } catch {
+          // Fall through to local projection/publish; remote state never blocks local use.
+        }
+      }
+
+      const activities = await this.db.activities.toArray();
+      const revision = Math.max(previous?.revision ?? 0, serverRevision ?? 0) + 1;
       const { start, end } = horizonBounds("fiveYears", this.now());
       const projection = createBookingProjectionV1(activities, revision, { start, end });
       await replacePendingBookingSnapshot(projection, this.db);

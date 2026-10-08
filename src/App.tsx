@@ -306,7 +306,7 @@ export function App() {
       if (active && import.meta.env.DEV) {
         const coordinator = new BookingSyncCoordinator({ developmentOwnerId: "local-owner" });
         bookingSync.current = coordinator;
-        coordinator.start();
+        void coordinator.start();
       }
     }).catch(() => { if (active) setError(translate("en", "storageError")); }).finally(() => { if (active) setLoading(false); });
     const ticker = window.setInterval(() => setNow(new Date()), 30_000);

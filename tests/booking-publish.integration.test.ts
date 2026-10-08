@@ -52,6 +52,24 @@ describe("client/server booking projection publish", () => {
     }]);
   });
 
+  it("refreshes only the authenticated owner's interval snapshot", async () => {
+    const { endpoint, db } = await runningServer();
+    await publish(endpoint, projection(1, [
+      { startUtc: "2026-10-08T08:00:00.000Z", endUtc: "2026-10-08T09:00:00.000Z" },
+    ]));
+    const response = await fetch(endpoint, { headers: { "x-lxnoro-dev-owner-id": "local-owner" } });
+    const state = db.prepare("SELECT updated_at FROM booking_projection_state WHERE owner_id = ?").get("local-owner") as { updated_at: string };
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      ownerId: "local-owner",
+      revision: 1,
+      intervals: [{ startUtc: "2026-10-08T08:00:00.000Z", endUtc: "2026-10-08T09:00:00.000Z" }],
+      syncStatus: "synced",
+      updatedAt: state.updated_at,
+    });
+  });
+
   it("atomically replaces the covered snapshot and removes stale intervals", async () => {
     const { db, endpoint } = await runningServer();
     await publish(endpoint, projection(1, [

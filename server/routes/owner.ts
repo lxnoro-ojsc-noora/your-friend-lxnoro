@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import Database from "better-sqlite3";
-import { replaceOwnerBusyIntervals, BusyIntervalConflictError, StaleProjectionError } from "../db/repositories/busyIntervals";
+import { getOwnerBusyIntervalSnapshot, replaceOwnerBusyIntervals, BusyIntervalConflictError, StaleProjectionError } from "../db/repositories/busyIntervals";
 import { ProjectionInputError } from "../domain/conflicts";
 
 export interface OwnerRouteOptions {
@@ -8,13 +8,30 @@ export interface OwnerRouteOptions {
 }
 
 export function registerOwnerRoutes(app: FastifyInstance, db: Database.Database, options: OwnerRouteOptions): void {
-  app.put("/api/owner/booking/busy-intervals", async (request, reply) => {
+  const requireDevelopmentOwner = (request: { headers: Record<string, string | string[] | undefined> }, reply: { code: (status: number) => { send: (payload: unknown) => unknown } }): string | undefined => {
     if (!options.developmentAuth || process.env.NODE_ENV === "production") {
-      return reply.code(503).send({ code: "owner_auth_unavailable" });
+      reply.code(503).send({ code: "owner_auth_unavailable" });
+      return undefined;
     }
     const ownerHeader = request.headers["x-lxnoro-dev-owner-id"];
     const ownerId = typeof ownerHeader === "string" ? ownerHeader.trim() : "";
-    if (!ownerId || ownerId.length > 128) return reply.code(401).send({ code: "owner_auth_required" });
+    if (!ownerId || ownerId.length > 128) {
+      reply.code(401).send({ code: "owner_auth_required" });
+      return undefined;
+    }
+    return ownerId;
+  };
+
+  app.get("/api/owner/booking/busy-intervals", async (request, reply) => {
+    const ownerId = requireDevelopmentOwner(request, reply);
+    if (!ownerId) return;
+    const snapshot = getOwnerBusyIntervalSnapshot(db, ownerId);
+    return reply.send(snapshot);
+  });
+
+  app.put("/api/owner/booking/busy-intervals", async (request, reply) => {
+    const ownerId = requireDevelopmentOwner(request, reply);
+    if (!ownerId) return;
 
     try {
       const result = replaceOwnerBusyIntervals(db, ownerId, request.body);

@@ -16,6 +16,32 @@ export interface ProjectionPublishResult {
   updatedAt: string;
 }
 
+export interface OwnerBusyIntervalSnapshot {
+  ownerId: string;
+  revision: number;
+  intervals: Array<{ startUtc: string; endUtc: string }>;
+  syncStatus: "synced";
+  updatedAt: string | null;
+}
+
+export function getOwnerBusyIntervalSnapshot(db: Database.Database, ownerId: string): OwnerBusyIntervalSnapshot {
+  const state = db.prepare("SELECT source_revision, updated_at FROM booking_projection_state WHERE owner_id = ?").get(ownerId) as
+    { source_revision: number; updated_at: string } | undefined;
+  const rows = db.prepare(`
+    SELECT start_utc, end_utc
+    FROM busy_intervals
+    WHERE owner_id = ?
+    ORDER BY start_utc, end_utc
+  `).all(ownerId) as Array<{ start_utc: string; end_utc: string }>;
+  return {
+    ownerId,
+    revision: state?.source_revision ?? 0,
+    intervals: rows.map(({ start_utc, end_utc }) => ({ startUtc: start_utc, endUtc: end_utc })),
+    syncStatus: "synced",
+    updatedAt: state?.updated_at ?? null,
+  };
+}
+
 export function replaceOwnerBusyIntervals(
   db: Database.Database,
   ownerId: string,
