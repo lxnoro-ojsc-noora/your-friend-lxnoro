@@ -1,5 +1,6 @@
 import type { BookingProjectionV1 } from "../domain/bookingProjection";
 import type { ServerBookingSnapshot } from "../data/bookingSync";
+import type { ConfirmedAppointmentProjection } from "../domain/confirmedAppointment";
 
 export interface BookingProjectionPublishResult {
   revision: number;
@@ -18,6 +19,7 @@ export interface PublishBookingProjectionOptions {
   /** Local-only development identity; replace with the approved secure session when implemented. */
   developmentOwnerId: string;
   endpoint?: string;
+  appointmentsEndpoint?: string;
   fetchImpl?: typeof fetch;
 }
 
@@ -113,4 +115,48 @@ export async function fetchBookingProjectionSnapshot(
     syncStatus: "synced",
     updatedAt: result.updatedAt as string | null,
   };
+}
+
+/** Fetch only the confirmed appointment fields required to draw local calendar blocks. */
+export async function fetchConfirmedAppointmentProjections(
+  options: PublishBookingProjectionOptions,
+): Promise<ConfirmedAppointmentProjection[]> {
+  const response = await (options.fetchImpl ?? fetch)(options.appointmentsEndpoint ?? "/api/owner/booking/appointments", {
+    method: "GET",
+    headers: { "x-lxnoro-dev-owner-id": options.developmentOwnerId },
+  });
+  let result: unknown;
+  try { result = await response.json(); }
+  catch { throw new BookingApiError(response.status, "invalid_appointments_response"); }
+  if (!response.ok) {
+    const code = isRecord(result) && typeof result.code === "string" ? result.code : "request_failed";
+    throw new BookingApiError(response.status, code);
+  }
+  if (!isRecord(result) || !hasOnlyKeys(result, ["appointments"]) ||
+      !Array.isArray(result.appointments) || result.appointments.length > 10_000) {
+    throw new BookingApiError(response.status, "invalid_appointments_response");
+  }
+  const appointments: ConfirmedAppointmentProjection[] = [];
+  const seen = new Set<string>();
+  for (const item of result.appointments) {
+    if (!isRecord(item) || !hasOnlyKeys(item, ["id", "startUtc", "endUtc", "durationMinutes", "timeZone"]) ||
+        typeof item.id !== "string" || !/^[0-9a-f-]{36}$/i.test(item.id) || seen.has(item.id) ||
+        !validUtcInstant(item.startUtc) || !validUtcInstant(item.endUtc) ||
+        !Number.isSafeInteger(item.durationMinutes) || (item.durationMinutes as number) <= 0 ||
+        Date.parse(item.endUtc as string) - Date.parse(item.startUtc as string) !== (item.durationMinutes as number) * 60_000 ||
+        typeof item.timeZone !== "string") {
+      throw new BookingApiError(response.status, "invalid_appointments_response");
+    }
+    try { new Intl.DateTimeFormat("en", { timeZone: item.timeZone }); }
+    catch { throw new BookingApiError(response.status, "invalid_appointments_response"); }
+    seen.add(item.id);
+    appointments.push({
+      id: item.id,
+      startUtc: item.startUtc,
+      endUtc: item.endUtc,
+      durationMinutes: item.durationMinutes as number,
+      timeZone: item.timeZone,
+    });
+  }
+  return appointments;
 }

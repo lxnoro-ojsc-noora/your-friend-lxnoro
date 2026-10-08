@@ -27,6 +27,8 @@ export interface ScheduledActivity {
   title: string;
   symbol: string;
   startLocal: string;
+  /** Exact instant for imported appointments whose local wall time may be ambiguous at a DST fold. */
+  startUtc?: string;
   timeZone: string;
   durationMinutes: number;
   status: "scheduled" | "complete";
@@ -74,6 +76,8 @@ export interface Preferences {
   startersInitialized: boolean;
   weatherEnabled?: boolean;
   weatherCoordinates?: { latitude: number; longitude: number };
+  /** Opaque bearer token stored locally so the owner can share or disable this link. */
+  bookingLinkId?: string;
 }
 
 export interface StarterDefinition {

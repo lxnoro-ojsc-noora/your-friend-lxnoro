@@ -84,7 +84,7 @@ export function createBookingProjectionV1(
       throw new RangeError("Scheduled activity duration must be a positive whole number of minutes");
     }
 
-    const startMs = activityInstant(activity.startLocal, activity.timeZone).getTime();
+    const startMs = activityInstant(activity.startLocal, activity.timeZone, activity.startUtc).getTime();
     const endMs = startMs + activity.durationMinutes * 60_000;
     const clippedStartMs = Math.max(startMs, coverageStartMs);
     const clippedEndMs = Math.min(endMs, coverageEndMs);

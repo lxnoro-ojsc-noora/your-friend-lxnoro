@@ -62,7 +62,14 @@ export function activityDateKey(startLocal: string): string {
   return startLocal.slice(0, 10);
 }
 
-export function activityInstant(startLocal: string, timeZone: string): Date {
+export function activityInstant(startLocal: string, timeZone: string, exactStartUtc?: string): Date {
+  if (exactStartUtc !== undefined) {
+    const instant = new Date(exactStartUtc);
+    if (!Number.isFinite(instant.getTime()) || instant.toISOString() !== exactStartUtc) {
+      throw new RangeError("Exact activity instant must be a canonical UTC instant");
+    }
+    return instant;
+  }
   return localDateTime(activityDateKey(startLocal), startLocal.slice(11, 16), timeZone);
 }
 

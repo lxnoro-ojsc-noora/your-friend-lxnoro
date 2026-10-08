@@ -10,6 +10,11 @@ import { dueActivities } from "./domain/reminders";
 import { expandActivities, occurrenceOverrideId, recurrenceRuleFromInput } from "./domain/recurrence";
 import { deliverReminder, requestNotificationPermission } from "./platform/reminderDelivery";
 import { BookingSyncCoordinator } from "./platform/bookingSyncCoordinator";
+import { getConfirmedAppointmentSnapshot } from "./data/confirmedAppointments";
+import { confirmedAppointmentToActivityList } from "./domain/confirmedAppointment";
+import { OwnerBookingPanel } from "./components/BookingViews";
+import { fetchConfirmedAppointmentProjections } from "./platform/bookingApi";
+import { replaceConfirmedAppointmentSnapshot } from "./data/confirmedAppointments";
 
 const horizonLabels: Record<Horizon, MessageKey> = {
   day: "day",
@@ -24,6 +29,14 @@ const localeTag: Record<Locale, string> = { en: "en", ar: "ar" };
 function displayTypeTitle(type: ActivityType, locale: Locale): string {
   if (type.titleOverride?.trim()) return type.titleOverride;
   return type.starterKey ? formatStarterTitle(locale, type.starterKey) : "";
+}
+
+function isConfirmedBooking(activity: ScheduledActivity): boolean {
+  return activity.id.startsWith("booking:");
+}
+
+function activityDisplayTitle(activity: ScheduledActivity, locale: Locale): string {
+  return isConfirmedBooking(activity) ? translate(locale, "sharedAppointment") : activity.title;
 }
 
 function localDateTimeInput(date: Date): { date: string; time: string } {
@@ -84,7 +97,7 @@ function ActivityDialog({
   onPostponeOccurrence,
   onWeatherToggle,
 }: {
-  kind: "type" | "schedule" | "custom" | "profile";
+  kind: "type" | "schedule" | "custom" | "profile" | "booking";
   activityType?: ActivityType;
   activity?: ScheduledActivity;
   preferences?: Preferences;
@@ -126,6 +139,19 @@ function ActivityDialog({
           <label className="alert-toggle"><input type="checkbox" checked={preferences?.weatherEnabled === true} onChange={(event) => void onWeatherToggle(event.target.checked)} />{t("weatherEnabled")}</label>
           <p className="muted small-copy">{t("weatherLater")}</p>
           <div className="dialog-actions"><button className="button secondary" onClick={onClose}>{t("cancel")}</button><button className="button primary" onClick={() => { window.dispatchEvent(new CustomEvent("lxnoro:profile", { detail: { country, city } })); onClose(); }}>{t("save")}</button></div>
+        </section>
+      </div>
+    );
+  }
+
+  if (kind === "booking" && activity) {
+    const instant = activityInstant(activity.startLocal, activity.timeZone, activity.startUtc);
+    return (
+      <div className="dialog-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
+        <section className="dialog-card" role="dialog" aria-modal="true" aria-labelledby="dialog-title">
+          <div className="dialog-heading"><div><span className="eyebrow">{t("activity")}</span><h2 id="dialog-title">{t("sharedAppointment")}</h2></div><button className="icon-button" onClick={onClose} aria-label={t("cancel")}>×</button></div>
+          <div className="reminder-activity"><span className="reminder-symbol">📅</span><div><p>{formatDate(instant, locale, { timeZone: activity.timeZone })}</p><p>{formatTime(instant, locale, activity.timeZone)} · {activity.durationMinutes} {t("durationUnit")}</p></div></div>
+          <div className="dialog-actions"><button className="button primary" onClick={onClose}>{t("dismiss")}</button></div>
         </section>
       </div>
     );
@@ -203,12 +229,12 @@ function ReminderDialog({ activity, locale, onDismiss, onComplete }: {
   onComplete: () => void;
 }) {
   const t = (key: MessageKey) => translate(locale, key);
-  const instant = activityInstant(activity.startLocal, activity.timeZone);
+  const instant = activityInstant(activity.startLocal, activity.timeZone, activity.startUtc);
   return (
     <div className="dialog-backdrop reminder-backdrop">
       <section className="dialog-card reminder-card" role="dialog" aria-modal="true" aria-labelledby="reminder-title">
         <span className="eyebrow">{t("reminderTitle")}</span>
-        <div className="reminder-activity"><span className="reminder-symbol">{activity.symbol}</span><div><h2 id="reminder-title">{activity.title}</h2><p>{formatDate(instant, locale, { timeZone: activity.timeZone })} · {formatTime(instant, locale, activity.timeZone)}</p></div></div>
+        <div className="reminder-activity"><span className="reminder-symbol">{activity.symbol}</span><div><h2 id="reminder-title">{activityDisplayTitle(activity, locale)}</h2><p>{formatDate(instant, locale, { timeZone: activity.timeZone })} · {formatTime(instant, locale, activity.timeZone)}</p></div></div>
         {activity.notes.trim() ? <div className="reminder-notes"><span className="focus-label">{t("notes")}</span><p>{activity.notes}</p></div> : <p className="muted small-copy">{t("noNotes")}</p>}
         <div className="dialog-actions"><button className="button secondary" onClick={onDismiss}>{t("reminderDismiss")}</button><button className="button primary" onClick={onComplete}>{t("complete")}</button></div>
       </section>
@@ -245,11 +271,11 @@ function DayMatrix({ activities, selectedDate, locale, onSelect, now }: {
           const width = Math.max((Math.min(activity.durationMinutes, 1440 - startMinutes) / 1440) * 100, 1.5);
           return (
             <div className="activity-lane" key={activity.occurrenceKey}>
-              <div className="lane-label"><span className="lane-symbol">{activity.symbol}</span><span className="lane-title">{activity.title}</span></div>
+            <div className="lane-label"><span className="lane-symbol">{activity.symbol}</span><span className="lane-title">{activityDisplayTitle(activity, locale)}</span></div>
               <div className="lane-track">
                 {current && <div className="now-line" style={{ insetInlineStart: `${nowPercent}%` }} />}
-                <button className="time-block" style={{ insetInlineStart: `${(startMinutes / 1440) * 100}%`, width: `${width}%` }} onClick={() => onSelect(activity)} title={`${activity.title} · ${activity.startLocal.slice(11, 16)}`}>
-                  <span>{activity.symbol} {activity.title}</span><small>{activity.startLocal.slice(11, 16)}</small>
+                <button className="time-block" style={{ insetInlineStart: `${(startMinutes / 1440) * 100}%`, width: `${width}%` }} onClick={() => onSelect(activity)} title={`${activityDisplayTitle(activity, locale)} · ${activity.startLocal.slice(11, 16)}`}>
+                  <span>{activity.symbol} {activityDisplayTitle(activity, locale)}</span><small>{activity.startLocal.slice(11, 16)}</small>
                 </button>
               </div>
             </div>
@@ -269,14 +295,14 @@ function HorizonMatrix({ horizon, anchor, activities, locale, onSelect }: {
   onSelect: (activity: ScheduledActivity) => void;
 }) {
   const { buckets } = buildBuckets(horizon, anchor, locale);
-  const formatShortTime = (entry: ScheduledActivity) => formatTime(activityInstant(entry.startLocal, entry.timeZone), locale, entry.timeZone);
+  const formatShortTime = (entry: ScheduledActivity) => formatTime(activityInstant(entry.startLocal, entry.timeZone, entry.startUtc), locale, entry.timeZone);
   return (
     <div className={`horizon-board horizon-${horizon}`} style={{ "--bucket-count": buckets.length } as CSSProperties}>
       {buckets.map((bucket) => {
         const items = activities.filter((entry) => isInRange(entry.startLocal, bucket.date, bucket.end));
         return <section className="horizon-cell" key={bucket.key} aria-label={bucket.label}>
           <header>{bucket.label}</header>
-          {items.length ? items.map((entry) => <button className="horizon-activity" key={entry.occurrenceKey} onClick={() => onSelect(entry)}><span>{entry.symbol}</span><strong>{entry.title}</strong><small>{formatShortTime(entry)}</small></button>) : <span className="horizon-empty">·</span>}
+          {items.length ? items.map((entry) => <button className="horizon-activity" key={entry.occurrenceKey} onClick={() => onSelect(entry)}><span>{entry.symbol}</span><strong>{activityDisplayTitle(entry, locale)}</strong><small>{formatShortTime(entry)}</small></button>) : <span className="horizon-empty">·</span>}
         </section>;
       })}
     </div>
@@ -291,11 +317,12 @@ export function App() {
   const [selectedDate, setSelectedDate] = useState(localDateKey(new Date()));
   const [horizon, setHorizon] = useState<Horizon>("day");
   const [now, setNow] = useState(new Date());
-  const [dialog, setDialog] = useState<{ kind: "type" | "schedule" | "custom" | "profile"; type?: ActivityType; activity?: ScheduledActivity } | null>(null);
+  const [dialog, setDialog] = useState<{ kind: "type" | "schedule" | "custom" | "profile" | "booking"; type?: ActivityType; activity?: ScheduledActivity } | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const [reminderQueue, setReminderQueue] = useState<ScheduledOccurrence[]>([]);
   const [notice, setNotice] = useState("");
+  const [bookingPanelOpen, setBookingPanelOpen] = useState(false);
   const [weatherState, setWeatherState] = useState<WeatherState>({ status: "unavailable", reason: "disabled" });
   const reminderScanActive = useRef(false);
   const reminderInFlight = useRef(new Set<string>());
@@ -312,18 +339,19 @@ export function App() {
   const visibleActivities = horizonOccurrences;
   const dayActivities = useMemo(() => expandActivities(activities, selectedDate, new Date(Date.parse(`${selectedDate}T00:00:00`) + 86_400_000).toISOString().slice(0, 10), occurrenceOverrides), [activities, occurrenceOverrides, selectedDate]);
   const nextActivity = useMemo(() => expandActivities(activities, localDateKey(now), new Date(Date.parse(`${localDateKey(now)}T00:00:00`) + 5 * 366 * 86_400_000).toISOString().slice(0, 10), occurrenceOverrides)
-    .filter((entry) => activityInstant(entry.startLocal, entry.timeZone) >= now)
-    .sort((a, b) => activityInstant(a.startLocal, a.timeZone).getTime() - activityInstant(b.startLocal, b.timeZone).getTime())[0], [activities, occurrenceOverrides, now]);
+    .filter((entry) => activityInstant(entry.startLocal, entry.timeZone, entry.startUtc) >= now)
+    .sort((a, b) => activityInstant(a.startLocal, a.timeZone, a.startUtc).getTime() - activityInstant(b.startLocal, b.timeZone, b.startUtc).getTime())[0], [activities, occurrenceOverrides, now]);
 
   const refresh = async () => {
-    const [savedTypes, savedActivities, savedPreferences, savedOverrides] = await Promise.all([
+    const [savedTypes, savedActivities, savedPreferences, savedOverrides, confirmedAppointments] = await Promise.all([
       database.activityTypes.toArray(),
       database.activities.toArray(),
       database.preferences.get("main"),
       database.occurrenceOverrides.toArray(),
+      getConfirmedAppointmentSnapshot(database),
     ]);
     setTypes(savedTypes.sort((a, b) => a.createdAt.localeCompare(b.createdAt)));
-    setActivities(savedActivities);
+    setActivities([...savedActivities, ...confirmedAppointmentToActivityList(confirmedAppointments, translate(savedPreferences?.locale ?? "en", "sharedAppointment"))]);
     setOccurrenceOverrides(savedOverrides);
     if (savedPreferences) setPreferences(savedPreferences);
   };
@@ -523,6 +551,11 @@ export function App() {
   const activeReminder = reminderQueue[0];
 
   const openSchedule = (type: ActivityType) => setDialog({ kind: "schedule", type });
+  const selectActivity = (activity: ScheduledActivity) => setDialog({
+    kind: isConfirmedBooking(activity) ? "booking" : "schedule",
+    type: types.find((type) => type.id === activity.typeId),
+    activity,
+  });
 
   if (loading || !preferences) return <main className="loading-shell"><span className="brand-mark">LX</span><p>{translate("en", "loading")}</p></main>;
 
@@ -533,6 +566,7 @@ export function App() {
         <div className="topbar-actions">
           <button className="profile-chip" onClick={() => setDialog({ kind: "profile" })} aria-label={t("location")}><span className="status-dot" />{preferences.city ? `${preferences.city}${preferences.country ? `, ${preferences.country}` : ""}` : t("addLocation")}</button>
           <button className="notification-button" onClick={() => void enableNotifications()}>{t("enableNotifications")}</button>
+          <button className="notification-button" onClick={() => setBookingPanelOpen(true)}>{t("bookingManage")}</button>
           <div className="language-switch" aria-label={t("language")}><button aria-pressed={locale === "en"} onClick={() => void selectLanguage("en")}>EN</button><button aria-pressed={locale === "ar"} onClick={() => void selectLanguage("ar")}>ع</button></div>
         </div>
       </header>
@@ -551,7 +585,7 @@ export function App() {
 
       <section className="focus-row" aria-label={`${t("now")} and ${t("next")}`}>
         <article className="focus-card now-card"><span className="focus-symbol">◉</span><div><span className="focus-label">{t("now")}</span><strong>{formatTime(now, locale)}</strong></div><span className="focus-live">{t("live")}</span></article>
-        <article className="focus-card next-card"><span className="focus-symbol">↗</span><div className="next-content"><span className="focus-label">{t("next")}</span>{nextActivity ? <strong>{nextActivity.symbol} {nextActivity.title}<small>{formatTime(activityInstant(nextActivity.startLocal, nextActivity.timeZone), locale, nextActivity.timeZone)}</small></strong> : <strong className="muted">{t("nothingNext")}</strong>}</div></article>
+        <article className="focus-card next-card"><span className="focus-symbol">↗</span><div className="next-content"><span className="focus-label">{t("next")}</span>{nextActivity ? <strong>{nextActivity.symbol} {activityDisplayTitle(nextActivity, locale)}<small>{formatTime(activityInstant(nextActivity.startLocal, nextActivity.timeZone, nextActivity.startUtc), locale, nextActivity.timeZone)}</small></strong> : <strong className="muted">{t("nothingNext")}</strong>}</div></article>
       </section>
 
       {error && <div className="error-banner" role="alert">{error}<button onClick={() => setError("")} aria-label={t("dismiss")}>×</button></div>}
@@ -561,7 +595,7 @@ export function App() {
         <div className="section-heading matrix-heading"><div><span className="eyebrow">{t("timeStructure")}</span><h2>{horizon === "day" ? t("today") : t(horizonLabels[horizon])}</h2><p className="muted">{formatDate(selectedDateObject, locale)}</p></div>
           <div className="matrix-actions"><label className="date-picker-label"><span>{t("selectDate")}</span><input type="date" value={selectedDate} onChange={(event) => setSelectedDate(event.target.value)} aria-label={t("selectDate")} /></label><button className="button primary" onClick={() => setDialog({ kind: "custom" })}>＋ {visibleActivities.length === 0 ? t("addFirst") : t("addActivity")}</button></div>
         </div>
-        {horizon === "day" ? <DayMatrix activities={dayActivities} selectedDate={selectedDate} locale={locale} now={now} onSelect={(activity) => setDialog({ kind: "schedule", type: types.find((type) => type.id === activity.typeId), activity })} /> : <HorizonMatrix horizon={horizon} anchor={selectedDateObject} activities={visibleActivities} locale={locale} onSelect={(activity) => setDialog({ kind: "schedule", type: types.find((type) => type.id === activity.typeId), activity })} />}
+        {horizon === "day" ? <DayMatrix activities={dayActivities} selectedDate={selectedDate} locale={locale} now={now} onSelect={selectActivity} /> : <HorizonMatrix horizon={horizon} anchor={selectedDateObject} activities={visibleActivities} locale={locale} onSelect={selectActivity} />}
         {visibleActivities.length === 0 && <p className="empty-state-copy">{t("emptyHorizon")}</p>}
       </section>
 
@@ -578,6 +612,12 @@ export function App() {
       <footer className="app-footer"><span><span className="privacy-dot" />{t("saved")}</span><span>{preferences.city ? `${preferences.city}${preferences.country ? `, ${preferences.country}` : ""}` : t("locationNotSet")}</span></footer>
 
       {dialog && <ActivityDialog kind={dialog.kind} activityType={dialog.type} activity={dialog.activity} preferences={preferences} locale={locale} onClose={() => setDialog(null)} onSaveType={saveActivityType} onSaveActivity={saveActivity} onDeleteActivity={deleteActivity} onCompleteOccurrence={completeOccurrence} onPostponeOccurrence={postponeOccurrence} onWeatherToggle={toggleWeather} />}
+      {bookingPanelOpen && <OwnerBookingPanel preferences={preferences} locale={locale} onClose={() => setBookingPanelOpen(false)} onLinkSaved={(bookingLinkId) => setPreferences((current) => current ? { ...current, bookingLinkId } : current)} onConfirmed={async () => {
+        const appointments = await fetchConfirmedAppointmentProjections({ developmentOwnerId:"local-owner" });
+        await replaceConfirmedAppointmentSnapshot(appointments, database);
+        await refresh();
+        void bookingSync.current?.projectionChanged();
+      }} />}
       {activeReminder && <ReminderDialog activity={activeReminder} locale={locale} onDismiss={dismissReminder} onComplete={() => void completeReminder(activeReminder)} />}
     </main>
   );

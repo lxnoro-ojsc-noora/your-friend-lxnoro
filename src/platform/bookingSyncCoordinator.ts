@@ -2,12 +2,15 @@ import { acceptNewerServerBookingSnapshot, getBookingSyncSnapshot, markBookingSn
 import { database, type LxnoroDatabase } from "../data/database";
 import { createBookingProjectionV1 } from "../domain/bookingProjection";
 import { horizonBounds } from "../domain/time";
-import { fetchBookingProjectionSnapshot, publishBookingProjection } from "./bookingApi";
+import { fetchBookingProjectionSnapshot, fetchConfirmedAppointmentProjections, publishBookingProjection } from "./bookingApi";
+import { replaceConfirmedAppointmentSnapshot } from "../data/confirmedAppointments";
+import { confirmedAppointmentToActivityList } from "../domain/confirmedAppointment";
 
 export interface BookingSyncCoordinatorOptions {
   db?: LxnoroDatabase;
   developmentOwnerId?: string;
   endpoint?: string;
+  appointmentsEndpoint?: string;
   fetchImpl?: typeof fetch;
   eventTarget?: EventTarget;
   isOnline?: () => boolean;
@@ -58,6 +61,16 @@ export class BookingSyncCoordinator {
       let serverRevision: number | undefined;
       if (refreshServer && this.options.developmentOwnerId && this.isOnline()) {
         try {
+          const appointments = await fetchConfirmedAppointmentProjections({
+            developmentOwnerId: this.options.developmentOwnerId,
+            appointmentsEndpoint: this.options.appointmentsEndpoint,
+            fetchImpl: this.options.fetchImpl,
+          });
+          await replaceConfirmedAppointmentSnapshot(appointments, this.db);
+        } catch {
+          // Appointment refresh is independent from local planning and interval sync.
+        }
+        try {
           const serverSnapshot = await fetchBookingProjectionSnapshot({
             developmentOwnerId: this.options.developmentOwnerId,
             endpoint: this.options.endpoint,
@@ -71,7 +84,9 @@ export class BookingSyncCoordinator {
         }
       }
 
-      const activities = await this.db.activities.toArray();
+      const localActivities = await this.db.activities.toArray();
+      const confirmedAppointments = await this.db.confirmedBookingAppointments.toArray();
+      const activities = [...localActivities, ...confirmedAppointmentToActivityList(confirmedAppointments)];
       const overrides = await this.db.occurrenceOverrides.toArray();
       const revision = Math.max(previous?.revision ?? 0, serverRevision ?? 0) + 1;
       const { start, end } = horizonBounds("fiveYears", this.now());
