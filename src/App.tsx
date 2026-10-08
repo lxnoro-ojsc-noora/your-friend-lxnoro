@@ -1,8 +1,11 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent } from "react";
 import { database, initializeDatabase } from "./data/database";
+import { setWeatherEnabled } from "./data/weatherPreferences";
+import { loadWeatherState } from "./data/weatherCache";
 import { formatStarterTitle, formatDate, formatTime, translate, type MessageKey } from "./i18n/messages";
 import { activityDateKey, activityInstant, addActivityMinutes, horizonBounds, isInRange, localDateKey, minutesIntoDay, nearestQuarterDate } from "./domain/time";
 import type { ActivityOccurrenceOverride, ActivityType, Horizon, Locale, OccurrenceReminderLedgerEntry, Preferences, ScheduledActivity, ScheduledOccurrence } from "./domain/model";
+import type { WeatherState } from "./domain/weather";
 import { dueActivities } from "./domain/reminders";
 import { expandActivities, occurrenceOverrideId, recurrenceRuleFromInput } from "./domain/recurrence";
 import { deliverReminder, requestNotificationPermission } from "./platform/reminderDelivery";
@@ -79,6 +82,7 @@ function ActivityDialog({
   onDeleteActivity,
   onCompleteOccurrence,
   onPostponeOccurrence,
+  onWeatherToggle,
 }: {
   kind: "type" | "schedule" | "custom" | "profile";
   activityType?: ActivityType;
@@ -91,6 +95,7 @@ function ActivityDialog({
   onDeleteActivity: (entry: ScheduledActivity) => Promise<void>;
   onCompleteOccurrence: (entry: ScheduledOccurrence) => Promise<void>;
   onPostponeOccurrence: (entry: ScheduledOccurrence) => Promise<void>;
+  onWeatherToggle: (enabled: boolean) => Promise<void>;
 }) {
   const t = (key: MessageKey) => translate(locale, key);
   const now = localDateTimeInput(new Date());
@@ -118,6 +123,7 @@ function ActivityDialog({
           <div className="dialog-heading"><div><span className="eyebrow">{t("settings")}</span><h2 id="dialog-title">{t("location")}</h2></div><button className="icon-button" onClick={onClose} aria-label={t("cancel")}>×</button></div>
           <label>{t("country")}<input value={country} onChange={(event) => setCountry(event.target.value)} maxLength={80} autoFocus /></label>
           <label>{t("city")}<input value={city} onChange={(event) => setCity(event.target.value)} maxLength={80} /></label>
+          <label className="alert-toggle"><input type="checkbox" checked={preferences?.weatherEnabled === true} onChange={(event) => void onWeatherToggle(event.target.checked)} />{t("weatherEnabled")}</label>
           <p className="muted small-copy">{t("weatherLater")}</p>
           <div className="dialog-actions"><button className="button secondary" onClick={onClose}>{t("cancel")}</button><button className="button primary" onClick={() => { window.dispatchEvent(new CustomEvent("lxnoro:profile", { detail: { country, city } })); onClose(); }}>{t("save")}</button></div>
         </section>
@@ -290,6 +296,7 @@ export function App() {
   const [loading, setLoading] = useState(true);
   const [reminderQueue, setReminderQueue] = useState<ScheduledOccurrence[]>([]);
   const [notice, setNotice] = useState("");
+  const [weatherState, setWeatherState] = useState<WeatherState>({ status: "unavailable", reason: "disabled" });
   const reminderScanActive = useRef(false);
   const reminderInFlight = useRef(new Set<string>());
   const bookingSync = useRef<BookingSyncCoordinator | null>(null);
@@ -382,6 +389,37 @@ export function App() {
     document.title = t("product");
   }, [locale]);
 
+  useEffect(() => {
+    if (loading || !preferences) return;
+    let active = true;
+    let expiryTimer = 0;
+    const updateWeather = async () => {
+      const next = await loadWeatherState(database, {
+        enabled: preferences.weatherEnabled === true,
+        coordinates: preferences.weatherCoordinates,
+        online: navigator.onLine,
+      });
+      if (!active) return;
+      setWeatherState(next);
+      if (next.status === "available") {
+        const delay = Math.max(1000, Date.parse(next.context.expiresAt) - Date.now());
+        expiryTimer = window.setTimeout(() => void updateWeather(), delay);
+      }
+    };
+    const onConnectionChange = () => { window.clearTimeout(expiryTimer); void updateWeather(); };
+    void updateWeather();
+    window.addEventListener("online", onConnectionChange);
+    window.addEventListener("offline", onConnectionChange);
+    document.addEventListener("visibilitychange", onConnectionChange);
+    return () => {
+      active = false;
+      window.clearTimeout(expiryTimer);
+      window.removeEventListener("online", onConnectionChange);
+      window.removeEventListener("offline", onConnectionChange);
+      document.removeEventListener("visibilitychange", onConnectionChange);
+    };
+  }, [loading, preferences]);
+
   const saveActivityType = async (type: ActivityType) => {
     try { await database.activityTypes.put(type); await refresh(); setError(""); }
     catch { setError(t("storageError")); }
@@ -458,6 +496,19 @@ export function App() {
     catch { setError(t("storageError")); }
   };
 
+  const toggleWeather = async (enabled: boolean) => {
+    try {
+      const result = await setWeatherEnabled(database, enabled, typeof navigator !== "undefined" ? navigator.geolocation : undefined);
+      const next = await database.preferences.get("main");
+      if (next) setPreferences(next);
+      if (result.status === "granted") {
+        setNotice(t("weatherLocationGranted"));
+      } else if (result.status !== "disabled") {
+        setNotice(result.status === "denied" ? t("weatherPermissionDenied") : t("weatherLocationUnavailable"));
+      }
+    } catch { setError(t("storageError")); }
+  };
+
   const enableNotifications = async () => {
     const permission = await requestNotificationPermission();
     setNotice(permission === "granted" ? t("notificationEnabled") : permission === "denied" ? t("notificationDenied") : t("notificationUnsupported"));
@@ -490,6 +541,8 @@ export function App() {
         <div><span className="eyebrow">{t("currentDay")}</span><h1>{formatDate(now, locale)}</h1><p className="muted">{t("horizonIntro")}</p></div>
         <div className="clock-card"><span className="clock-pulse" /><div><span className="clock-label">{t("now")}</span><strong>{formatTime(now, locale)}</strong></div></div>
       </section>
+
+      {weatherState.status !== "unavailable" && <div className="weather-context" role="status"><span>{weatherState.context.symbolCode ?? "☁"}</span><strong>{weatherState.context.temperatureC}°C</strong>{weatherState.context.precipitationMm !== null && <span>{weatherState.context.precipitationMm} mm</span>}<small>{weatherState.status === "stale" ? t("weatherStale") : formatTime(new Date(weatherState.context.forecastTime), locale)}</small><small>{weatherState.context.attribution}</small></div>}
 
       <nav className="horizon-nav" aria-label={t("planningHorizons")}>
         {(Object.keys(horizonLabels) as Horizon[]).map((item) => <button key={item} className={horizon === item ? "horizon-tab active" : "horizon-tab"} aria-pressed={horizon === item} onClick={() => setHorizon(item)}>{t(horizonLabels[item])}</button>)}
@@ -524,7 +577,7 @@ export function App() {
 
       <footer className="app-footer"><span><span className="privacy-dot" />{t("saved")}</span><span>{preferences.city ? `${preferences.city}${preferences.country ? `, ${preferences.country}` : ""}` : t("locationNotSet")}</span></footer>
 
-      {dialog && <ActivityDialog kind={dialog.kind} activityType={dialog.type} activity={dialog.activity} preferences={preferences} locale={locale} onClose={() => setDialog(null)} onSaveType={saveActivityType} onSaveActivity={saveActivity} onDeleteActivity={deleteActivity} onCompleteOccurrence={completeOccurrence} onPostponeOccurrence={postponeOccurrence} />}
+      {dialog && <ActivityDialog kind={dialog.kind} activityType={dialog.type} activity={dialog.activity} preferences={preferences} locale={locale} onClose={() => setDialog(null)} onSaveType={saveActivityType} onSaveActivity={saveActivity} onDeleteActivity={deleteActivity} onCompleteOccurrence={completeOccurrence} onPostponeOccurrence={postponeOccurrence} onWeatherToggle={toggleWeather} />}
       {activeReminder && <ReminderDialog activity={activeReminder} locale={locale} onDismiss={dismissReminder} onComplete={() => void completeReminder(activeReminder)} />}
     </main>
   );

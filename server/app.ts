@@ -5,15 +5,19 @@ import { dirname, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { openBookingDatabase } from "./db/schema";
 import { registerOwnerRoutes } from "./routes/owner";
+import { registerWeatherRoutes } from "./routes/weather";
+import type { WeatherProviderOptions } from "./weather/metNorway";
 
 export interface ServerOptions {
   developmentAuth?: boolean;
+  weather?: WeatherProviderOptions;
 }
 
 export function createServer(db: Database.Database, options: ServerOptions = {}): FastifyInstance {
   const app = Fastify({ logger: false });
   app.get("/health", async () => ({ status: "ok" }));
   registerOwnerRoutes(app, db, { developmentAuth: options.developmentAuth ?? false });
+  registerWeatherRoutes(app, options.weather);
   app.addHook("onClose", async () => { db.close(); });
   return app;
 }

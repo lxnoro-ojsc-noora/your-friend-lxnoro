@@ -53,6 +53,9 @@ h1, h2, p { margin-top: 0; }
 .muted { color: var(--muted); }
 .clock-card { gap: 13px; min-width: 146px; padding: 13px 16px; border: 1px solid rgba(191,151,255,.18); border-radius: var(--radius-md); background: linear-gradient(135deg, rgba(144,100,196,.14), rgba(255,255,255,.025)); }
 .clock-card strong { display: block; margin-top: 2px; font-size: 20px; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+.weather-context { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin: -10px 0 15px; color: var(--text-muted); font-size: 11px; }
+.weather-context strong { color: var(--text); font-size: 14px; font-variant-numeric: tabular-nums; }
+.weather-context small { font-size: 9px; }
 .clock-label { color: var(--muted); font-size: 11px; }
 .clock-pulse { width: 9px; height: 9px; border-radius: 50%; background: var(--mint); box-shadow: 0 0 14px rgba(148,230,202,.66); }
 

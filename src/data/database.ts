@@ -1,6 +1,7 @@
 import Dexie, { type Table } from "dexie";
 import { createStarterTypes } from "./catalog";
 import type { BookingSyncOutboxRecord } from "./bookingSync";
+import type { WeatherCacheRecord } from "./weatherCache";
 import type { ActivityOccurrenceOverride, ActivityType, Locale, OccurrenceReminderLedgerEntry, Preferences, ReminderLedgerEntry, ScheduledActivity } from "../domain/model";
 
 export class LxnoroDatabase extends Dexie {
@@ -11,6 +12,7 @@ export class LxnoroDatabase extends Dexie {
   bookingSyncOutbox!: Table<BookingSyncOutboxRecord, string>;
   occurrenceOverrides!: Table<ActivityOccurrenceOverride, string>;
   occurrenceReminderLedger!: Table<OccurrenceReminderLedgerEntry, string>;
+  weatherCache!: Table<WeatherCacheRecord, string>;
 
   constructor(name = "your-friend-lxnoro") {
     super(name);
@@ -44,6 +46,16 @@ export class LxnoroDatabase extends Dexie {
       occurrenceOverrides: "id, activityId, originalStartLocal, status",
       occurrenceReminderLedger: "occurrenceKey, activityId, dueAt",
     });
+    this.version(6).stores({
+      activityTypes: "id, starterKey, createdAt",
+      activities: "id, typeId, startLocal, status",
+      preferences: "id",
+      reminderLedger: "activityId, dueAt",
+      bookingSyncOutbox: "id",
+      occurrenceOverrides: "id, activityId, originalStartLocal, status",
+      occurrenceReminderLedger: "occurrenceKey, activityId, dueAt",
+      weatherCache: "id, updatedAt",
+    });
   }
 }
 
@@ -65,6 +77,7 @@ export async function initializeDatabase(db: LxnoroDatabase = database): Promise
       city: "",
       timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
       startersInitialized: true,
+      weatherEnabled: false,
     };
     await db.activityTypes.bulkAdd(createStarterTypes());
     await db.preferences.add(defaults);

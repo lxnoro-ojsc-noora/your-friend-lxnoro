@@ -72,6 +72,8 @@ export interface Preferences {
   city: string;
   timeZone: string;
   startersInitialized: boolean;
+  weatherEnabled?: boolean;
+  weatherCoordinates?: { latitude: number; longitude: number };
 }
 
 export interface StarterDefinition {
