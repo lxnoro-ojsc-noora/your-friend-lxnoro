@@ -1,18 +1,20 @@
 import Dexie, { type Table } from "dexie";
 import { createStarterTypes } from "./catalog";
-import type { ActivityType, Locale, Preferences, ScheduledActivity } from "../domain/model";
+import type { ActivityType, Locale, Preferences, ReminderLedgerEntry, ScheduledActivity } from "../domain/model";
 
 export class LxnoroDatabase extends Dexie {
   activityTypes!: Table<ActivityType, string>;
   activities!: Table<ScheduledActivity, string>;
   preferences!: Table<Preferences, string>;
+  reminderLedger!: Table<ReminderLedgerEntry, string>;
 
   constructor(name = "your-friend-lxnoro") {
     super(name);
-    this.version(1).stores({
+    this.version(2).stores({
       activityTypes: "id, starterKey, createdAt",
       activities: "id, typeId, startLocal, status",
       preferences: "id",
+      reminderLedger: "activityId, dueAt",
     });
   }
 }

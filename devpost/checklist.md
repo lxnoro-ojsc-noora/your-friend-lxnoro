@@ -19,7 +19,7 @@ Build mode: fast
   Learner check: Open the app at phone width, inspect the empty grid and visible starter activities, switch English/Arabic, schedule one activity, reload, and confirm its symbol, label, and position are clear.
   Commit: `Build local-first time matrix foundation`
 
-- [ ] **2. A due activity returns with its complete note and supported reminder**
+- [x] **2. A due activity returns with its complete note and supported reminder**
   Becomes usable: A timed task supports an expandable/collapsible substantial note, alert setting, status/completion, and an intentional Micro-Bot reminder that reveals the complete saved note when due while the app is active. Unsupported or denied delivery channels fail independently and visibly.
   Why now: This is the intention-to-action kernel and the primary demonstration moment; proving persistence, due-time calculation, and useful reminder content early exposes the riskiest client behavior before broader planning surfaces.
   PRD ref: `prd.md > The Core Journey`, `prd.md > Notes`, `prd.md > Micro-Bot reminders and platform behavior`, `prd.md > States and Boundaries`

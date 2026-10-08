@@ -1,8 +1,10 @@
-import { useEffect, useMemo, useState, type CSSProperties, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent } from "react";
 import { database, initializeDatabase } from "./data/database";
 import { formatStarterTitle, formatDate, formatTime, translate, type MessageKey } from "./i18n/messages";
 import { activityDateKey, horizonBounds, isInRange, localDateKey, localDateTime, minutesIntoDay, nearestQuarterDate } from "./domain/time";
 import type { ActivityType, Horizon, Locale, Preferences, ScheduledActivity } from "./domain/model";
+import { dueActivities } from "./domain/reminders";
+import { deliverReminder, requestNotificationPermission } from "./platform/reminderDelivery";
 
 const horizonLabels: Record<Horizon, MessageKey> = {
   day: "day",
@@ -87,9 +89,12 @@ function ActivityDialog({
   const [date, setDate] = useState(activity ? activityDateKey(activity.startLocal) : now.date);
   const [time, setTime] = useState(activity?.startLocal.slice(11, 16) ?? now.time);
   const [duration, setDuration] = useState(String(activity?.durationMinutes ?? 30));
+  const [notes, setNotes] = useState(activity?.notes ?? "");
+  const [alertEnabled, setAlertEnabled] = useState(activity?.alertEnabled ?? true);
   const [country, setCountry] = useState(preferences?.country ?? "");
   const [city, setCity] = useState(preferences?.city ?? "");
   const [saving, setSaving] = useState(false);
+  const noteWords = notes.trim() ? notes.trim().split(/\s+/u).length : 0;
 
   if (kind === "profile") {
     return (
@@ -130,8 +135,8 @@ function ActivityDialog({
           timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
           durationMinutes: Number(duration),
           status: activity?.status ?? "scheduled",
-          notes: activity?.notes ?? "",
-          alertEnabled: activity?.alertEnabled ?? true,
+          notes,
+          alertEnabled,
           createdAt: activity?.createdAt ?? new Date().toISOString(),
         });
       }
@@ -148,17 +153,38 @@ function ActivityDialog({
         <div className="dialog-heading"><div><span className="eyebrow">{t("activity")}</span><h2 id="dialog-title">{heading}</h2></div><button className="icon-button" onClick={onClose} aria-label={t("cancel")}>×</button></div>
         <form onSubmit={(event) => void submit(event)}>
           <div className="symbol-title-row">
-            <label className="symbol-field">{t("symbol")}<input value={symbol} onChange={(event) => setSymbol(event.target.value)} maxLength={8} required /></label>
+            <label className="symbol-field">{t("symbol")}<input value={symbol} onChange={(event) => setSymbol(event.target.value)} maxLength={32} required /></label>
             <label className="grow-field">{t("activityName")}<input value={title} onChange={(event) => setTitle(event.target.value)} maxLength={90} required autoFocus /></label>
           </div>
           {kind === "schedule" && <div className="form-row"><label>{t("date")}<input type="date" value={date} onChange={(event) => setDate(event.target.value)} required /></label><label>{t("startTime")}<input type="time" value={time} onChange={(event) => setTime(event.target.value)} required /></label><label>{t("duration")}<input type="number" value={duration} min={5} max={1440} step={5} onChange={(event) => setDuration(event.target.value)} required /></label></div>}
+          {kind === "schedule" && <div className="notes-field"><label htmlFor="activity-notes">{t("notes")}</label><textarea id="activity-notes" value={notes} onChange={(event) => setNotes(event.target.value)} maxLength={12000} rows={2} placeholder={t("notesPlaceholder")} aria-describedby="notes-count" /><div className="notes-meta"><span id="notes-count">{noteWords} / 1,000</span>{noteWords > 1000 && <span className="note-limit" role="alert">{t("noteWordLimit")}</span>}</div></div>}
+          {kind === "schedule" && <label className="alert-toggle"><input type="checkbox" checked={alertEnabled} onChange={(event) => setAlertEnabled(event.target.checked)} />{t("alertEnabled")}</label>}
           <div className="dialog-actions">
             {activity && <button type="button" className="button danger-ghost" onClick={() => void onDeleteActivity(activity)}>{t("remove")}</button>}
             <span className="action-spacer" />
             <button type="button" className="button secondary" onClick={onClose}>{t("cancel")}</button>
-            <button type="submit" className="button primary" disabled={saving}>{t("save")}</button>
+            <button type="submit" className="button primary" disabled={saving || noteWords > 1000}>{t("save")}</button>
           </div>
         </form>
+      </section>
+    </div>
+  );
+}
+
+function ReminderDialog({ activity, locale, onDismiss, onComplete }: {
+  activity: ScheduledActivity;
+  locale: Locale;
+  onDismiss: () => void;
+  onComplete: () => void;
+}) {
+  const t = (key: MessageKey) => translate(locale, key);
+  return (
+    <div className="dialog-backdrop reminder-backdrop">
+      <section className="dialog-card reminder-card" role="dialog" aria-modal="true" aria-labelledby="reminder-title">
+        <span className="eyebrow">{t("reminderTitle")}</span>
+        <div className="reminder-activity"><span className="reminder-symbol">{activity.symbol}</span><div><h2 id="reminder-title">{activity.title}</h2><p>{formatDate(localDateTime(activity.startLocal.slice(0, 10), activity.startLocal.slice(11, 16)), locale)} · {formatTime(localDateTime(activity.startLocal.slice(0, 10), activity.startLocal.slice(11, 16)), locale)}</p></div></div>
+        {activity.notes.trim() ? <div className="reminder-notes"><span className="focus-label">{t("notes")}</span><p>{activity.notes}</p></div> : <p className="muted small-copy">{t("noNotes")}</p>}
+        <div className="dialog-actions"><button className="button secondary" onClick={onDismiss}>{t("reminderDismiss")}</button><button className="button primary" onClick={onComplete}>{t("complete")}</button></div>
       </section>
     </div>
   );
@@ -241,6 +267,10 @@ export function App() {
   const [dialog, setDialog] = useState<{ kind: "type" | "schedule" | "custom" | "profile"; type?: ActivityType; activity?: ScheduledActivity } | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
+  const [reminderQueue, setReminderQueue] = useState<ScheduledActivity[]>([]);
+  const [notice, setNotice] = useState("");
+  const reminderScanActive = useRef(false);
+  const reminderInFlight = useRef(new Set<string>());
 
   const locale: Locale = preferences?.locale ?? "en";
   const t = (key: MessageKey) => translate(locale, key);
@@ -279,6 +309,36 @@ export function App() {
   }, []);
 
   useEffect(() => {
+    if (loading) return;
+    let active = true;
+    const scan = async () => {
+      if (!active || reminderScanActive.current || document.visibilityState === "hidden") return;
+      reminderScanActive.current = true;
+      try {
+        const ledger = await database.reminderLedger.toArray();
+        const due = dueActivities(activities, ledger, new Date()).filter((activity) => !reminderInFlight.current.has(activity.id));
+        if (due.length) {
+          due.forEach(({ id }) => reminderInFlight.current.add(id));
+          await database.reminderLedger.bulkPut(due.map((activity) => ({ activityId: activity.id, dueAt: activity.startLocal, presentedAt: new Date().toISOString() })));
+          if (active) setReminderQueue((queue) => [...queue, ...due]);
+          await Promise.all(due.map((activity) => deliverReminder(activity)));
+        }
+      } catch {
+        reminderInFlight.current.clear();
+        if (active) setError(translate("en", "storageError"));
+      } finally {
+        reminderScanActive.current = false;
+      }
+    };
+    const firstScan = window.setTimeout(() => void scan(), 0);
+    const timer = window.setInterval(() => void scan(), 30_000);
+    const onResume = () => { if (document.visibilityState !== "hidden") void scan(); };
+    window.addEventListener("focus", onResume);
+    document.addEventListener("visibilitychange", onResume);
+    return () => { active = false; window.clearTimeout(firstScan); window.clearInterval(timer); window.removeEventListener("focus", onResume); document.removeEventListener("visibilitychange", onResume); };
+  }, [activities, loading]);
+
+  useEffect(() => {
     document.documentElement.lang = locale;
     document.documentElement.dir = locale === "ar" ? "rtl" : "ltr";
     document.title = t("product");
@@ -290,7 +350,17 @@ export function App() {
   };
 
   const saveActivity = async (entry: ScheduledActivity) => {
-    try { await database.activities.put(entry); await refresh(); setError(""); }
+    try {
+      const existing = await database.activities.get(entry.id);
+      await database.transaction("rw", database.activities, database.reminderLedger, async () => {
+        await database.activities.put(entry);
+        if (!existing || existing.startLocal !== entry.startLocal || existing.status !== entry.status || existing.alertEnabled !== entry.alertEnabled) {
+          await database.reminderLedger.delete(entry.id);
+          reminderInFlight.current.delete(entry.id);
+        }
+      });
+      await refresh(); setError("");
+    }
     catch { setError(t("storageError")); }
   };
 
@@ -312,6 +382,19 @@ export function App() {
     catch { setError(t("storageError")); }
   };
 
+  const enableNotifications = async () => {
+    const permission = await requestNotificationPermission();
+    setNotice(permission === "granted" ? t("notificationEnabled") : permission === "denied" ? t("notificationDenied") : t("notificationUnsupported"));
+  };
+
+  const dismissReminder = () => setReminderQueue((queue) => queue.slice(1));
+  const completeReminder = async (activity: ScheduledActivity) => {
+    await saveActivity({ ...activity, status: "complete" });
+    setReminderQueue((queue) => queue.filter(({ id }) => id !== activity.id));
+  };
+
+  const activeReminder = reminderQueue[0];
+
   const openSchedule = (type: ActivityType) => setDialog({ kind: "schedule", type });
 
   if (loading || !preferences) return <main className="loading-shell"><span className="brand-mark">LX</span><p>{translate("en", "loading")}</p></main>;
@@ -322,6 +405,7 @@ export function App() {
         <div className="brand-lockup"><span className="brand-mark">LX</span><div><p className="brand-name">{t("product")}</p><p className="brand-subtitle">{t("companion")}</p></div></div>
         <div className="topbar-actions">
           <button className="profile-chip" onClick={() => setDialog({ kind: "profile" })} aria-label={t("location")}><span className="status-dot" />{preferences.city ? `${preferences.city}${preferences.country ? `, ${preferences.country}` : ""}` : t("addLocation")}</button>
+          <button className="notification-button" onClick={() => void enableNotifications()}>{t("enableNotifications")}</button>
           <div className="language-switch" aria-label={t("language")}><button aria-pressed={locale === "en"} onClick={() => void selectLanguage("en")}>EN</button><button aria-pressed={locale === "ar"} onClick={() => void selectLanguage("ar")}>ع</button></div>
         </div>
       </header>
@@ -342,6 +426,7 @@ export function App() {
       </section>
 
       {error && <div className="error-banner" role="alert">{error}<button onClick={() => setError("")} aria-label={t("dismiss")}>×</button></div>}
+      {notice && <div className="notice-banner" role="status">{notice}<button onClick={() => setNotice("")} aria-label={t("dismiss")}>×</button></div>}
 
       <section className="matrix-panel panel">
         <div className="section-heading matrix-heading"><div><span className="eyebrow">{t("timeStructure")}</span><h2>{horizon === "day" ? t("today") : t(horizonLabels[horizon])}</h2><p className="muted">{formatDate(selectedDateObject, locale)}</p></div>
@@ -364,6 +449,7 @@ export function App() {
       <footer className="app-footer"><span><span className="privacy-dot" />{t("saved")}</span><span>{preferences.city ? `${preferences.city}${preferences.country ? `, ${preferences.country}` : ""}` : t("locationNotSet")}</span></footer>
 
       {dialog && <ActivityDialog kind={dialog.kind} activityType={dialog.type} activity={dialog.activity} preferences={preferences} locale={locale} onClose={() => setDialog(null)} onSaveType={saveActivityType} onSaveActivity={saveActivity} onDeleteActivity={deleteActivity} />}
+      {activeReminder && <ReminderDialog activity={activeReminder} locale={locale} onDismiss={dismissReminder} onComplete={() => void completeReminder(activeReminder)} />}
     </main>
   );
 }

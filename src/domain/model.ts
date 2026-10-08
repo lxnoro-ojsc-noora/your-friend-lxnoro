@@ -24,6 +24,12 @@ export interface ScheduledActivity {
   createdAt: string;
 }
 
+export interface ReminderLedgerEntry {
+  activityId: string;
+  dueAt: string;
+  presentedAt: string;
+}
+
 export interface Preferences {
   id: "main";
   locale: Locale;
