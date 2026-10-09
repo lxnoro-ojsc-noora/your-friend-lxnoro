@@ -11,6 +11,7 @@ const instances: Array<{ close: () => Promise<void>; db: Database.Database }> = 
 async function setup() {
   let now = new Date(initialNow);
   const db = new Database(":memory:"); initializeBookingSchema(db);
+  db.prepare("INSERT INTO booking_projection_state(owner_id,source_revision,updated_at) VALUES(?,?,?)").run("local-owner",12,initialNow.toISOString());
   const app = createServer(db,{ developmentAuth:true,bookingNow:()=>now });
   await app.listen({host:"127.0.0.1",port:0});
   const address=app.server.address(); if (!address || typeof address === "string") throw new Error("Test API did not bind");
@@ -52,13 +53,13 @@ describe("Slice 7 alternative HTTP/API integration",()=>{
     expect(response.status).toBe(401);
   });
 
-  it("records requester acceptance without approving the parent or creating an appointment",async()=>{
+  it("accepts a requester alternative and confirms the appointment transactionally",async()=>{
     const state=await setup();
     const proposal=await proposeBookingAlternative(state.requestId,proposalInput,state.routeFetch);
     const result=await respondToPublicAlternative(proposal.responseKey,"accept",state.routeFetch);
     expect(result.status).toBe("accepted");
-    expect(state.db.prepare("SELECT status FROM booking_requests WHERE request_id=?").get(state.requestId)).toEqual({status:"pending"});
-    expect(state.db.prepare("SELECT COUNT(*) AS count FROM confirmed_appointments").get()).toEqual({count:0});
+    expect(state.db.prepare("SELECT status FROM booking_requests WHERE request_id=?").get(state.requestId)).toEqual({status:"approved"});
+    expect(state.db.prepare("SELECT COUNT(*) AS count FROM confirmed_appointments").get()).toEqual({count:1});
   });
 
   it("records requester rejection and leaves the original request Pending",async()=>{

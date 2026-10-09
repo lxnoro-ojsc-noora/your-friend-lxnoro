@@ -340,6 +340,27 @@ export function registerBookingRoutes(app: FastifyInstance, db: Database.Databas
     }
   });
 
+  app.get<{ Params: { responseKey: string } }>("/api/public/booking/alternatives/:responseKey", async (request, reply) => {
+    if (!/^[A-Za-z0-9_-]{32}$/.test(request.params.responseKey)) return reply.code(404).send({ code: "alternative_unavailable" });
+    const hash = createHash("sha256").update(request.params.responseKey, "utf8").digest("hex");
+    const row = db.prepare(`
+      SELECT proposal.proposed_date, proposal.proposed_start_local, proposal.duration_minutes,
+        proposal.time_zone, proposal.start_utc, proposal.status AS proposal_status,
+        request.status AS request_status, link.expires_at_utc
+      FROM booking_alternative_proposals AS proposal
+      JOIN booking_requests AS request ON request.request_id = proposal.request_id
+      JOIN booking_links AS link ON link.link_id_hash = request.link_id_hash
+      WHERE proposal.response_key_hash = ?
+    `).get(hash) as {
+      proposed_date: string; proposed_start_local: string; duration_minutes: number;
+      time_zone: string; start_utc: string; proposal_status: string;
+      request_status: string; expires_at_utc: string | null;
+    } | undefined;
+    if (!row) return reply.code(404).send({ code: "alternative_unavailable" });
+    if (row.proposal_status !== "proposed" || row.request_status !== "pending") return reply.code(409).send({ code: "alternative_already_responded" });
+    if (Date.parse(row.start_utc) <= now().getTime() || (row.expires_at_utc !== null && Date.parse(row.expires_at_utc) <= now().getTime())) return reply.code(410).send({ code: "alternative_expired" });
+    return reply.send({ status: "proposed", proposedDate: row.proposed_date, proposedStartTime: row.proposed_start_local, durationMinutes: row.duration_minutes, timeZone: row.time_zone });
+  });
   app.post<{ Params: { responseKey: string } }>("/api/public/booking/alternatives/:responseKey/response", async (request, reply) => {
     if (!/^[A-Za-z0-9_-]{32}$/.test(request.params.responseKey) || !isRecord(request.body) ||
         !hasOnlyKeys(request.body, ["decision"]) ||

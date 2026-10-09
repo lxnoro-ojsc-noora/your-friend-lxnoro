@@ -56,7 +56,17 @@ export async function proposeBookingAlternative(
   }
   return result;
 }
-export async function respondToPublicAlternative(
+export interface PublicAlternativeDetails extends BookingAlternativeInput {
+  status: "proposed";
+}
+export async function getPublicAlternative(responseKey: string, fetchImpl: typeof fetch = fetch): Promise<PublicAlternativeDetails> {
+  if (!/^[A-Za-z0-9_-]{32}$/.test(responseKey)) throw new Error("alternative_unavailable");
+  const result = await json<PublicAlternativeDetails>(await fetchImpl(
+    `/api/public/booking/alternatives/${encodeURIComponent(responseKey)}`,
+  ));
+  if (result.status !== "proposed") throw new Error("booking_response_invalid");
+  return result;
+}export async function respondToPublicAlternative(
   responseKey: string,
   decision: "accept" | "reject",
   fetchImpl: typeof fetch = fetch,

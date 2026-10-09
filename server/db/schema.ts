@@ -154,6 +154,10 @@ export function initializeBookingSchema(db: Database.Database): void {
       ON booking_reminder_jobs(owner_id, status, due_at_utc);
   `);
 
+  const reminderColumns = db.prepare("PRAGMA table_info(booking_reminder_jobs)").all() as Array<{ name: string }>;
+  if (!reminderColumns.some(({ name }) => name === "attempt_count")) {
+    db.exec("ALTER TABLE booking_reminder_jobs ADD COLUMN attempt_count INTEGER NOT NULL DEFAULT 0 CHECK (attempt_count >= 0)");
+  }
   const appointmentColumns = db.prepare("PRAGMA table_info(confirmed_appointments)").all() as Array<{ name: string }>;
   if (!appointmentColumns.some(({ name }) => name === "time_zone")) {
     db.exec("ALTER TABLE confirmed_appointments ADD COLUMN time_zone TEXT NOT NULL DEFAULT 'UTC'");

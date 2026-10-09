@@ -3,7 +3,7 @@ import { Temporal } from "@js-temporal/polyfill";
 import { createBookingLinkId, type BookingLinkId, type OwnerAvailabilityConfiguration, type WeeklyAvailabilityWindow } from "../domain/booking";
 import type { Locale, Preferences } from "../domain/model";
 import { translate } from "../i18n/messages";
-import { decideBookingRequest, getPublicAvailability, listPendingBookingRequests, saveOwnerBookingConfiguration, submitPublicBookingRequest, type OwnerBookingConfiguration, type OwnerBookingRequest, type PublicSlot } from "../platform/bookingClient";
+import { decideBookingRequest, getPublicAvailability, listPendingBookingRequests, proposeBookingAlternative, getPublicAlternative, respondToPublicAlternative, saveOwnerBookingConfiguration, submitPublicBookingRequest, type OwnerBookingConfiguration, type OwnerBookingRequest, type PublicSlot } from "../platform/bookingClient";
 
 const words = {
   en: { manage:"Booking", title:"Shared booking", intro:"Share available times without revealing your private schedule.", close:"Close", enabled:"Booking link enabled", disabled:"Link disabled", durations:"Allowed durations (minutes)", weekdays:"Availability windows", addWindow:"Add window", remove:"Remove", weekday:["Mon","Tue","Wed","Thu","Fri","Sat","Sun"], start:"From", end:"To", notice:"Minimum notice (minutes)", max:"Maximum advance (minutes; blank = no limit)", before:"Buffer before (minutes)", after:"Buffer after (minutes)", zone:"Availability time zone", expiry:"Link expiry (optional UTC)", save:"Save settings", link:"Shareable link", copy:"Copy link", copied:"Copied", pending:"Pending requests", empty:"No pending requests.", approve:"Approve", reject:"Reject", requester:"Requester", requested:"Requested time", note:"Message", failed:"Booking service unavailable. Local planning is unaffected.", saveSuccess:"Booking settings saved.", approvalError:"Could not approve this slot. It may no longer be available.", requestError:"Could not complete the booking request.", publicTitle:"Request an appointment", publicIntro:"Choose an available time. Only open booking times are shown.", day:"Day", time:"Available time", duration:"Duration", fullName:"Full name", email:"Email address", optionalNote:"Optional short note", send:"Send booking request", pendingAck:"Request sent. It is Pending until the owner reviews it.", noSlots:"No available times for this day.", loadSlots:"Could not load availability. Try again while online.", private:"The owner's schedule details remain private.", language:"Language" },
@@ -23,7 +23,11 @@ export function OwnerBookingPanel({ preferences, locale, onClose, onConfirmed, o
   const [config, setConfig] = useState<OwnerBookingConfiguration>({ enabled:true, allowedDurationsMinutes:[30], windows:[], minimumNoticeMinutes:60, bufferBeforeMinutes:0, bufferAfterMinutes:0, timeZone:preferences.timeZone || "UTC" });
   const [linkId, setLinkId] = useState(preferences.bookingLinkId);
   const [requests, setRequests] = useState<OwnerBookingRequest[]>([]);
-  const [error, setError] = useState(""); const [status, setStatus] = useState(""); const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(""); const [status, setStatus] = useState(""); const [busy, setBusy] = useState(false); const [alternativeRequestId, setAlternativeRequestId] = useState("");
+ const [alternativeDate, setAlternativeDate] = useState("");
+ const [alternativeTime, setAlternativeTime] = useState("10:00");
+ const [alternativeDuration, setAlternativeDuration] = useState("30");
+ const [alternativeUrl, setAlternativeUrl] = useState("");
   const days = Array.from({ length:7 }, (_, index) => index + 1);
   useEffect(() => { let active = true; void Promise.all([
     listPendingBookingRequests().catch(() => []),
@@ -48,6 +52,22 @@ export function OwnerBookingPanel({ preferences, locale, onClose, onConfirmed, o
       setRequests((items) => items.filter((item) => item.id !== request.id));
       if (decision === "approved") await onConfirmed();
     } catch { setError(decision === "approved" ? text("approvalError") : text("failed")); }
+    finally { setBusy(false); }
+  };
+    const proposeAlternative = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!alternativeRequestId) return;
+    setBusy(true); setError(""); setAlternativeUrl("");
+    try {
+      const result = await proposeBookingAlternative(alternativeRequestId, {
+        proposedDate: alternativeDate,
+        proposedStartTime: alternativeTime,
+        durationMinutes: Number(alternativeDuration),
+        timeZone: config.timeZone,
+      });
+      setAlternativeUrl(`${window.location.origin}/alternative/${result.responseKey}`);
+      setStatus("Alternative link created. Copy and send it to the requester.");
+    } catch { setError(text("failed")); }
     finally { setBusy(false); }
   };
   const shareUrl = linkId ? `${window.location.origin}/book/${encodeURIComponent(linkId)}` : "";
@@ -75,8 +95,16 @@ export function OwnerBookingPanel({ preferences, locale, onClose, onConfirmed, o
     {shareUrl && <div className="booking-share"><label>{text("link")}<input readOnly value={shareUrl}/></label><button className="button secondary" onClick={() => void navigator.clipboard?.writeText(shareUrl).then(() => setStatus(text("copied"))).catch(() => setError(text("failed")))}>{text("copy")}</button></div>}
     <h3>{text("pending")} ({requests.length})</h3>
     {!requests.length && <p className="muted">{text("empty")}</p>}
-    {requests.map((request) => <article className="booking-request" key={request.id}><div><strong>{request.requesterName}</strong><span>{request.requesterEmail}</span><time>{slotTime(request.requestedStartUtc,locale,config.timeZone)} · {request.durationMinutes} min</time>{request.requesterNote && <p>{request.requesterNote}</p>}</div><div className="booking-request-actions"><button disabled={busy} className="button primary" onClick={() => void decide(request,"approved")}>{text("approve")}</button><button disabled={busy} className="button danger-ghost" onClick={() => void decide(request,"rejected")}>{text("reject")}</button></div></article>)}
-  </section></div>;
+    {requests.map((request) => <article className="booking-request" key={request.id}><div><strong>{request.requesterName}</strong><span>{request.requesterEmail}</span><time>{slotTime(request.requestedStartUtc,locale,config.timeZone)} · {request.durationMinutes} min</time>{request.requesterNote && <p>{request.requesterNote}</p>}</div><div className="booking-request-actions"><button disabled={busy} className="button primary" onClick={() => void decide(request,"approved")}>{text("approve")}</button><button disabled={busy} className="button danger-ghost" onClick={() => void decide(request,"rejected")}>{text("reject")}</button><button disabled={busy} className="button secondary" onClick={() => { setAlternativeRequestId(request.id); setAlternativeDate(currentDay(config.timeZone)); setAlternativeTime("10:00"); setAlternativeDuration(String(request.durationMinutes)); setAlternativeUrl(""); }}>Suggest alternative</button></div></article>)}
+      {alternativeRequestId && <form className="booking-request" onSubmit={(event) => void proposeAlternative(event)}>
+      <h3>Propose another time</h3>
+      <label>Date<input type="date" required min={currentDay(config.timeZone)} value={alternativeDate} onChange={(e) => setAlternativeDate(e.target.value)} /></label>
+      <label>Time<input type="time" required value={alternativeTime} onChange={(e) => setAlternativeTime(e.target.value)} /></label>
+      <label>Duration (minutes)<input type="number" required min={5} max={480} step={5} value={alternativeDuration} onChange={(e) => setAlternativeDuration(e.target.value)} /></label>
+      <button className="button primary" disabled={busy} type="submit">Create alternative link</button>
+      {alternativeUrl && <label>Requester response link<input readOnly value={alternativeUrl} /><button type="button" className="button secondary" onClick={() => void navigator.clipboard.writeText(alternativeUrl).then(() => setStatus(text("copied"))).catch(() => setError(text("failed")))}>Copy link</button></label>}
+    </form>}
+</section></div>;
 }
 
 async function databasePreference(bookingLinkId?: string): Promise<void> {
@@ -123,4 +151,43 @@ export function PublicBookingPage({ linkId }: { linkId: string }) {
     </form>}
     <p className="booking-privacy">{text("private")}</p>
   </section></main>;
+}
+
+
+export function AlternativeResponsePage({ responseKey }: { responseKey: string }) {
+  const [locale, setLocale] = useState<Locale>(() => navigator.language.toLowerCase().startsWith("ar") ? "ar" : "en");
+  const [message, setMessage] = useState("");
+  const [details, setDetails] = useState<Awaited<ReturnType<typeof getPublicAlternative>> | null>(null);
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const arabic = locale === "ar";
+  useEffect(() => { void getPublicAlternative(responseKey).then(setDetails).catch(() => setError(arabic ? "الرابط غير متاح أو انتهت صلاحيته." : "This link is unavailable or expired.")); }, [responseKey, arabic]);
+  const respond = async (decision: "accept" | "reject") => {
+    setBusy(true); setError(""); setMessage("");
+    try {
+      await respondToPublicAlternative(responseKey, decision);
+      setMessage(decision === "accept"
+        ? (arabic ? "تم قبول الموعد البديل." : "Alternative time accepted.")
+        : (arabic ? "تم رفض الموعد البديل." : "Alternative time declined."));
+    } catch {
+      setError(arabic ? "تعذر تسجيل الرد. قد يكون الرابط منتهيا أو لم يعد الموعد متاحا." : "Could not record your response. The link may have expired or the time may no longer be available.");
+    } finally { setBusy(false); }
+  };
+  return <main className="booking-public-shell" dir={arabic ? "rtl" : "ltr"}>
+    <section className="booking-public panel">
+      <header className="dialog-heading">
+        <div><span className="brand-mark">LX</span><h1>{arabic ? "موعد بديل" : "Alternative appointment"}</h1>
+          <p className="muted">{arabic ? "اختر قبول الموعد المقترح أو رفضه." : "Accept or decline the proposed time."}</p>
+        </div>
+        <div className="language-switch"><button aria-pressed={!arabic} onClick={() => setLocale("en")}>EN</button><button aria-pressed={arabic} onClick={() => setLocale("ar")}>ع</button></div>
+      </header>
+      {details && <div className="booking-request"><p>{arabic ? "التاريخ" : "Date"}: {details.proposedDate}</p><p>{arabic ? "الوقت" : "Time"}: {details.proposedStartTime}</p><p>{arabic ? "المدة" : "Duration"}: {details.durationMinutes} {arabic ? "دقيقة" : "minutes"}</p><p>{arabic ? "المنطقة الزمنية" : "Time zone"}: {details.timeZone}</p></div>}
+      {error && <p role="alert" className="booking-error">{error}</p>}
+      {message && <p role="status" className="booking-success">{message}</p>}
+      {!message && <div className="booking-request-actions">
+        <button className="button primary" disabled={busy} onClick={() => void respond("accept")}>{arabic ? "قبول الموعد" : "Accept time"}</button>
+        <button className="button danger-ghost" disabled={busy} onClick={() => void respond("reject")}>{arabic ? "رفض الموعد" : "Decline time"}</button>
+      </div>}
+    </section>
+  </main>;
 }

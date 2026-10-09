@@ -97,7 +97,7 @@ describe("booking alternative SQLite persistence", () => {
     const columns = db.prepare("SELECT name FROM pragma_table_info('booking_alternative_proposals')").all() as Array<{name:string}>;
     expect(columns.map(({name})=>name)).toEqual([
       "proposal_id","request_id","response_key_hash","proposed_date","proposed_start_local","start_utc","end_utc",
-      "duration_minutes","time_zone","status","created_at_utc","responded_at_utc",
+      "duration_minutes","time_zone","status","confirmed_projection_revision","created_at_utc","responded_at_utc",
     ]);
   });
 });
