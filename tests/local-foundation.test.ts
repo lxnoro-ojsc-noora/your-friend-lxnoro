@@ -15,6 +15,8 @@ describe("local-first foundation", () => {
     const db = new LxnoroDatabase(`test-${crypto.randomUUID()}`);
     databases.push(db);
     await initializeDatabase(db);
+    // Re-initialize to verify bulkPut/idempotency against constraint errors
+    await initializeDatabase(db);
     expect(await db.activityTypes.count()).toBe(starterDefinitions.length);
     expect(await db.activities.count()).toBe(0);
     expect(await db.preferences.get("main")).toMatchObject({ id: "main", startersInitialized: true });

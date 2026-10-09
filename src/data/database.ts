@@ -92,7 +92,7 @@ export async function initializeDatabase(db: LxnoroDatabase = database): Promise
       startersInitialized: true,
       weatherEnabled: false,
     };
-    await db.activityTypes.bulkAdd(createStarterTypes());
+    await db.activityTypes.bulkPut(createStarterTypes());
     await db.preferences.add(defaults);
   });
 }
