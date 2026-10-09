@@ -91,7 +91,7 @@ Build mode: fast
   Note: Verified offline persistence, outbox interval sync, RTL/LTR localization, typecheck (`tsc --noEmit`), test suite (23 test files, 136 tests passed), and production build (`vite build` passed). Physical smartwatch hardware verification remains unperformed.
   Commit: `Verify offline boundaries and responsive localization`
 
-- [ ] **9. Product hardening, documentation, and release readiness**
+- [x] **9. Product hardening, documentation, and release readiness**
   Becomes usable: The actual responsive web foundation has a documented setup, tested production build, clear privacy/platform/integration behavior, and a deployment path verified against LXNORO hosting; the complete long-term feature set remains represented and no feature is substituted with a mock.
   Why now: Release preparation follows the integrated behavior, so documentation and deployment claims can reflect the code and services that were actually verified.
   PRD ref: `prd.md > What We're Building`, `prd.md > Full Product Scope Boundary`, `prd.md > Open Questions`, `prd.md > The Core Journey`
@@ -99,6 +99,7 @@ Build mode: fast
   Build: Complete maintainable setup/architecture/privacy/offline/localization/service/platform-limits documentation; verify security boundaries, input validation, secret exclusions, dependency licenses, browser error paths and production build; verify LXNORO HTTPS/Node/persistent-storage/SMTP deployment requirements before deploying; evaluate whether a concrete AI-assisted capability has demonstrated value and privacy fit, without adding a generic chatbot or making core features provider-dependent; keep the exact result and unresolved hosting constraints documented.
   Verify (mechanical): `npm.cmd run typecheck`; `npm.cmd test`; `npm.cmd run build`; follow the documented clean local setup; inspect `git status`, tracked/staged file lists and staged diff for credentials/private data/unrelated work; verify the deployed product only if authorized hosting access and all required services are available.
   Learner check: Follow the README to start the actual app, try the core journey and booking path, inspect the offline/privacy and platform-limit documentation, then report any failure or mismatch before final review.
+  Note: Completed comprehensive README documentation, verified security boundaries and input validation, passed typecheck (`tsc --noEmit`), full test suite (23 test files, 136 tests passed), and production build (`vite build` passed). Local verification complete; live LXNORO hosting/SMTP production deployment remains unperformed without credentials.
   Commit: `Prepare LXNORO web platform for continued development`
 
 ## Hands-on Checkpoints
