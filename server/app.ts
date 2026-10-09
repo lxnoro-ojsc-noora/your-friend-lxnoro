@@ -7,6 +7,7 @@ import { openBookingDatabase } from "./db/schema";
 import { registerOwnerRoutes } from "./routes/owner";
 import { registerBookingRoutes } from "./routes/booking";
 import { BookingEmailDispatcher } from "./email/bookingConfirmation";
+import { BookingReminderDispatcher } from "./email/bookingReminderDispatcher";
 import { createConfiguredBookingMailer } from "./email/smtp";
 import type { BookingConfirmationMailer } from "./email/types";
 import { registerWeatherRoutes } from "./routes/weather";
@@ -23,10 +24,15 @@ export interface ServerOptions {
 export function createServer(db: Database.Database, options: ServerOptions = {}): FastifyInstance {
   const app = Fastify({ logger: false });
   const configuredMailer = createConfiguredBookingMailer();
+  const bookingMailer = options.bookingConfirmationMailer ?? configuredMailer.mailer;
   const emailDispatcher = new BookingEmailDispatcher(
     db,
-    options.bookingConfirmationMailer ?? configuredMailer.mailer,
+    bookingMailer,
     { messageIdDomain: configuredMailer.messageIdDomain, now: options.bookingNow },
+  );
+  const reminderDispatcher = new BookingReminderDispatcher(
+    db, bookingMailer, configuredMailer.messageIdDomain, process.env.OWNER_NOTIFICATION_EMAIL,
+    options.bookingNow,
   );
   app.get("/health", async () => ({ status: "ok" }));
   registerOwnerRoutes(app, db, { developmentAuth: options.developmentAuth ?? false });
@@ -37,8 +43,8 @@ export function createServer(db: Database.Database, options: ServerOptions = {})
   });
   registerWeatherRoutes(app, options.weather);
   if (options.startBookingEmailWorker) {
-    app.addHook("onReady", async () => { emailDispatcher.start(); });
-    app.addHook("onClose", async () => { emailDispatcher.stop(); });
+    app.addHook("onReady", async () => { emailDispatcher.start(); reminderDispatcher.start(); });
+    app.addHook("onClose", async () => { reminderDispatcher.stop(); emailDispatcher.stop(); });
   }
   app.addHook("onClose", async () => { db.close(); });
   return app;

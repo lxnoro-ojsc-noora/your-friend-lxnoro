@@ -9,6 +9,7 @@ import {
   insertBookingReminderJobsForPendingRequest,
   reconcileBookingReminderJobs,
   recoverExpiredBookingReminderLeases,
+  releaseClaimedBookingReminderJob,
   setOwnerBookingReminderQuietHours,
 } from "../server/db/repositories/bookingReminders";
 import { createPendingBookingRequest, decideOwnerBookingRequest, saveBookingLinkConfiguration } from "../server/db/repositories/bookings";
@@ -92,6 +93,29 @@ describe("durable owner booking reminders", () => {
     } finally { db.close(); }
   });
 
+  it("stops retrying a reminder after three delivery failures", () => {
+    const { db, request, now } = setup();
+    try {
+      let clock = now;
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        const job = claimDueBookingReminderJob(db, clock);
+        expect(job?.requestId).toBe(request.id);
+        const retryAt = new Date(clock.getTime() + 60_000);
+        expect(releaseClaimedBookingReminderJob(
+          db, job!.reminderId, job!.leaseToken, retryAt, `SMTP failure ${attempt}`,
+        )).toBe(true);
+        clock = retryAt;
+      }
+      const saved = db.prepare(
+        "SELECT status,attempt_count,last_error FROM booking_reminder_jobs WHERE request_id=? ORDER BY due_at_utc LIMIT 1",
+      ).get(request.id) as { status: string; attempt_count: number; last_error: string };
+      expect(saved).toMatchObject({
+        status: "cancelled",
+        attempt_count: 3,
+        last_error: "SMTP failure 3",
+      });
+    } finally { db.close(); }
+  });
   it("claims once, prevents a second live lease, and recovers an abandoned lease after restart", () => {
     const { db, request, now } = setup();
     try {

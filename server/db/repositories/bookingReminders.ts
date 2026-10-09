@@ -170,11 +170,16 @@ export function completeClaimedBookingReminderJob(db: Database.Database, reminde
 
 export function releaseClaimedBookingReminderJob(
   db: Database.Database, reminderId: string, leaseToken: string, retryAt: Date,
+  errorMessage = "reminder_delivery_failed",
 ): boolean {
+  const message = errorMessage.slice(0, 500);
   return db.prepare(`
-    UPDATE booking_reminder_jobs SET status='pending',due_at_utc=?,lease_token=NULL,lease_until_utc=NULL
+    UPDATE booking_reminder_jobs
+    SET status=CASE WHEN attempt_count + 1 >= 3 THEN 'cancelled' ELSE 'pending' END,
+        attempt_count=attempt_count + 1, last_error=?,
+        due_at_utc=?,lease_token=NULL,lease_until_utc=NULL
     WHERE reminder_id=? AND status='processing' AND lease_token=?
-  `).run(timestamp(retryAt), reminderId, leaseToken).changes === 1;
+  `).run(message, timestamp(retryAt), reminderId, leaseToken).changes === 1;
 }
 
 /** Cancels unsent/leased jobs in the same decision transaction as request finalization. */

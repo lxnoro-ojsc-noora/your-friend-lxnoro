@@ -1,4 +1,4 @@
-﻿import Database from "better-sqlite3";
+import Database from "better-sqlite3";
 import {
   claimDueBookingReminderJob,
   completeClaimedBookingReminderJob,
@@ -43,9 +43,15 @@ export class BookingReminderDispatcher {
             messageId: `<${job.idempotencyKey.replace(/[^A-Za-z0-9_.-]/g, "-")}@${this.messageIdDomain}>`,
           });
           completeClaimedBookingReminderJob(this.db, job.reminderId, job.leaseToken, this.now());
-        } catch {
+        } catch (error) {
           const retry = new Date(this.now().getTime() + 60_000);
-          releaseClaimedBookingReminderJob(this.db, job.reminderId, job.leaseToken, retry);
+          const message = error instanceof Error ? error.message : String(error);
+          console.error("Booking reminder delivery failed", {
+            reminderId: job.reminderId, cadence: job.cadence, error: message,
+          });
+          releaseClaimedBookingReminderJob(
+            this.db, job.reminderId, job.leaseToken, retry, message,
+          );
         }
       }
     } finally {

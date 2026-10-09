@@ -113,6 +113,7 @@ export function initializeBookingSchema(db: Database.Database): void {
       request_id TEXT NOT NULL UNIQUE REFERENCES booking_requests(request_id),
       status TEXT NOT NULL CHECK (status IN ('pending', 'sent', 'failed')),
       attempt_count INTEGER NOT NULL DEFAULT 0 CHECK (attempt_count >= 0),
+      last_error TEXT,
       next_attempt_at_utc TEXT NOT NULL CHECK (substr(next_attempt_at_utc, -1, 1) = 'Z'),
       lease_token TEXT,
       lease_until_utc TEXT CHECK (lease_until_utc IS NULL OR substr(lease_until_utc, -1, 1) = 'Z'),
@@ -157,6 +158,10 @@ export function initializeBookingSchema(db: Database.Database): void {
   const reminderColumns = db.prepare("PRAGMA table_info(booking_reminder_jobs)").all() as Array<{ name: string }>;
   if (!reminderColumns.some(({ name }) => name === "attempt_count")) {
     db.exec("ALTER TABLE booking_reminder_jobs ADD COLUMN attempt_count INTEGER NOT NULL DEFAULT 0 CHECK (attempt_count >= 0)");
+  }
+  const reminderErrorColumns = db.prepare("PRAGMA table_info(booking_reminder_jobs)").all() as Array<{ name: string }>;
+  if (!reminderErrorColumns.some(({ name }) => name === "last_error")) {
+    db.exec("ALTER TABLE booking_reminder_jobs ADD COLUMN last_error TEXT");
   }
   const appointmentColumns = db.prepare("PRAGMA table_info(confirmed_appointments)").all() as Array<{ name: string }>;
   if (!appointmentColumns.some(({ name }) => name === "time_zone")) {
