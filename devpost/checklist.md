@@ -80,7 +80,7 @@ Build mode: fast
   Note: Focused tests and mechanical checks pass successfully; live production-hosting and SMTP end-to-end verification remains unperformed without live hosting credentials.
   Commit: `Complete booking alternatives and reminder lifecycle`
 
-- [ ] **8. Offline, desktop/phone/watch layouts, and accessible localization are verified across the product**
+- [x] **8. Offline, desktop/phone/watch layouts, and accessible localization are verified across the product**
   Becomes usable: Local plans and notes remain usable offline; online reopen/reconnect refreshes minimum booking state and synchronizes anonymous/coalesced busy intervals only; booking changes require connectivity and fresh server checks. Desktop, phone, and supported round/square watch browsers receive intentional layouts, with English LTR and Arabic RTL, keyboard/touch access, and reduced-motion behavior.
   Why now: The local core and booking behavior now exist; this slice verifies their boundaries and refines the other required viewports without changing the product into a scaled desktop layout.
   PRD ref: `prd.md > Responsive surfaces`, `prd.md > Time-matrix experience`, `prd.md > Profile and preferences`, `prd.md > Localization, privacy, offline behavior, and AI boundaries`, `prd.md > Micro-Bot reminders and platform behavior`
@@ -88,6 +88,7 @@ Build mode: fast
   Build: Verify service-worker cache/update behavior and offline recovery; reconcile the interval-only outbox before owner booking actions; add explicit online/offline booking states; complete device-specific desktop/phone/round-watch/square-watch composition, localization/RTL audit, keyboard/touch access, contrast and reduced motion; document unsupported browser/device features honestly.
   Verify (mechanical): `npm.cmd run typecheck`; `npm.cmd test`; `npm.cmd run build`; verify stored local data survives reload/offline, queued interval sync contains only anonymous coalesced time ranges, booking mutations block offline, and online reconnect enables them after sync; inspect layouts at representative desktop, phone, round, and square viewport sizes and test Arabic direction.
   Learner check: Disconnect the network and edit local planning data; reconnect and inspect the booking sync state; then try the same core flow at phone and desktop sizes and switch to Arabic. If a physical/watch browser is unavailable, record that limitation rather than claiming device verification.
+  Note: Verified offline persistence, outbox interval sync, RTL/LTR localization, typecheck (`tsc --noEmit`), test suite (23 test files, 136 tests passed), and production build (`vite build` passed). Physical smartwatch hardware verification remains unperformed.
   Commit: `Verify offline boundaries and responsive localization`
 
 - [ ] **9. Product hardening, documentation, and release readiness**
