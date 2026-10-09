@@ -337,7 +337,8 @@ export function App() {
   const range = useMemo(() => horizonBounds(horizon, selectedDateObject), [horizon, selectedDateObject]);
   const horizonOccurrences = useMemo(() => expandActivities(activities, localDateKey(range.start), localDateKey(range.end), occurrenceOverrides), [activities, occurrenceOverrides, range]);
   const visibleActivities = horizonOccurrences;
-  const dayActivities = useMemo(() => expandActivities(activities, selectedDate, new Date(Date.parse(`${selectedDate}T00:00:00`) + 86_400_000).toISOString().slice(0, 10), occurrenceOverrides), [activities, occurrenceOverrides, selectedDate]);
+  const dayRange = useMemo(() => horizonBounds("day", selectedDateObject), [selectedDateObject]);
+  const dayActivities = useMemo(() => expandActivities(activities, localDateKey(dayRange.start), localDateKey(dayRange.end), occurrenceOverrides), [activities, occurrenceOverrides, dayRange]);
   const nextActivity = useMemo(() => expandActivities(activities, localDateKey(now), new Date(Date.parse(`${localDateKey(now)}T00:00:00`) + 5 * 366 * 86_400_000).toISOString().slice(0, 10), occurrenceOverrides)
     .filter((entry) => activityInstant(entry.startLocal, entry.timeZone, entry.startUtc) >= now)
     .sort((a, b) => activityInstant(a.startLocal, a.timeZone, a.startUtc).getTime() - activityInstant(b.startLocal, b.timeZone, b.startUtc).getTime())[0], [activities, occurrenceOverrides, now]);
