@@ -69,7 +69,7 @@ Build mode: fast
   Learner check: Configure a booking link, inspect the public view for availability-only disclosure, submit a request, confirm it stays Pending, then approve it and see the confirmed appointment enter the owner's time matrix.
   Commit: `Add private shared booking approval flow`
 
-- [ ] **7. Alternatives, time-aware owner reminders, and delivery recovery complete booking behavior**
+- [x] **7. Alternatives, time-aware owner reminders, and delivery recovery complete booking behavior**
   Becomes usable: The owner can reject and propose any alternative day/time/duration; requester acceptance rechecks availability before confirmation, while rejection closes without an appointment. Pending reminders follow the same-day and 24-hour/every-three-hour cadence outside sleep/rest. Confirmation failures retry safely and notify the owner without undoing the confirmed appointment.
   Why now: Builds on the verified pending/approval path and completes the booking lifecycle's most consequential concurrency, privacy, and reliability edges.
   PRD ref: `prd.md > Shared appointment-booking journey`, `prd.md > Shared Scheduling and Appointment Booking`, `prd.md > States and Boundaries`
@@ -77,6 +77,7 @@ Build mode: fast
   Build: Add arbitrary-duration/day/time alternative proposals and requester response; perform transactional availability/conflict recheck at acceptance; persist reminder/retry jobs across restart; schedule same-day and 24-hour/every-three-hour owner notices while suppressing sleep/rest times; show pending count/requested times; implement SMTP idempotency and bounded retry; report failed delivery while preserving confirmed appointment; ensure stale/unsynced projection blocks confirmation until current sync/check succeeds.
   Verify (mechanical): `npm.cmd run typecheck`; `npm.cmd test` for alternative accept/reject, stale slot conflict, request state retention, sleep-window cadence, restart recovery, duplicate-job prevention, retry exhaustion, and confirmed-booking persistence after simulated SMTP failure; manually exercise one conflict and one successful alternative flow.
   Learner check: Request and reject an original slot, propose an unrelated time/duration, accept it, and verify confirmation only after the conflict check; inspect owner reminder and email-failure outcomes.
+  Note: Focused tests and mechanical checks pass successfully; live production-hosting and SMTP end-to-end verification remains unperformed without live hosting credentials.
   Commit: `Complete booking alternatives and reminder lifecycle`
 
 - [ ] **8. Offline, desktop/phone/watch layouts, and accessible localization are verified across the product**
