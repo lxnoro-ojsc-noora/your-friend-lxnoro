@@ -153,6 +153,15 @@ export function initializeBookingSchema(db: Database.Database): void {
       ON booking_reminder_jobs(status, due_at_utc, lease_until_utc);
     CREATE INDEX IF NOT EXISTS booking_reminder_owner_due
       ON booking_reminder_jobs(owner_id, status, due_at_utc);
+
+    CREATE TABLE IF NOT EXISTS push_subscriptions (
+      endpoint TEXT PRIMARY KEY NOT NULL,
+      owner_id TEXT NOT NULL,
+      p256dh TEXT NOT NULL,
+      auth TEXT NOT NULL,
+      created_at_utc TEXT NOT NULL CHECK (substr(created_at_utc, -1, 1) = 'Z')
+    ) STRICT;
+    CREATE INDEX IF NOT EXISTS push_subscriptions_owner ON push_subscriptions(owner_id);
   `);
 
   const reminderColumns = db.prepare("PRAGMA table_info(booking_reminder_jobs)").all() as Array<{ name: string }>;

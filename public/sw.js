@@ -1,6 +1,6 @@
 const CACHE_PREFIX = "lxnoro-shell-";
-const CACHE_NAME = `${CACHE_PREFIX}v1`;
-const APP_SHELL = ["/", "/manifest.webmanifest"];
+const CACHE_NAME = `${CACHE_PREFIX}v2`;
+const APP_SHELL = ["/", "/manifest.webmanifest", "/icon.svg"];
 
 function isAppShellRequest(request) {
   const url = new URL(request.url);
@@ -38,5 +38,35 @@ self.addEventListener("fetch", (event) => {
         return response;
       })
       .catch(async () => (await caches.match(event.request)) ?? (await caches.match("/"))),
+  );
+});
+
+self.addEventListener("message", (event) => {
+  if (event.data && event.data.type === "SHOW_REMINDER") {
+    const { title, symbol, notes, id, startLocal } = event.data.activity;
+    const body = notes ? `${notes}\n\n${startLocal.slice(0, 10)} · ${startLocal.slice(11, 16)}` : `${startLocal.slice(0, 10)} · ${startLocal.slice(11, 16)}`;
+    event.waitUntil(
+      self.registration.showNotification(`${symbol} ${title}`, {
+        body,
+        tag: `lxnoro-${id}`,
+        icon: "/icon.svg",
+      })
+    );
+  }
+});
+
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  event.waitUntil(
+    clients.matchAll({ type: "window", includeUncontrolled: true }).then((clientList) => {
+      for (const client of clientList) {
+        if (client.url && "focus" in client) {
+          return client.focus();
+        }
+      }
+      if (clients.openWindow) {
+        return clients.openWindow("/");
+      }
+    })
   );
 });

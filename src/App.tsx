@@ -8,7 +8,7 @@ import type { ActivityOccurrenceOverride, ActivityType, Horizon, Locale, Occurre
 import type { WeatherState } from "./domain/weather";
 import { dueActivities } from "./domain/reminders";
 import { expandActivities, occurrenceOverrideId, recurrenceRuleFromInput } from "./domain/recurrence";
-import { deliverReminder, requestNotificationPermission } from "./platform/reminderDelivery";
+import { deliverReminder, requestNotificationPermission, initAudioOnUserGesture, registerPushSubscription } from "./platform/reminderDelivery";
 import { BookingSyncCoordinator } from "./platform/bookingSyncCoordinator";
 import { getConfirmedAppointmentSnapshot } from "./data/confirmedAppointments";
 import { confirmedAppointmentToActivityList } from "./domain/confirmedAppointment";
@@ -222,11 +222,12 @@ function ActivityDialog({
   );
 }
 
-function ReminderDialog({ activity, locale, onDismiss, onComplete }: {
+function ReminderDialog({ activity, locale, onDismiss, onComplete, onSnooze }: {
   activity: ScheduledOccurrence;
   locale: Locale;
   onDismiss: () => void;
   onComplete: () => void;
+  onSnooze: () => void;
 }) {
   const t = (key: MessageKey) => translate(locale, key);
   const instant = activityInstant(activity.startLocal, activity.timeZone, activity.startUtc);
@@ -236,7 +237,11 @@ function ReminderDialog({ activity, locale, onDismiss, onComplete }: {
         <span className="eyebrow">{t("reminderTitle")}</span>
         <div className="reminder-activity"><span className="reminder-symbol">{activity.symbol}</span><div><h2 id="reminder-title">{activityDisplayTitle(activity, locale)}</h2><p>{formatDate(instant, locale, { timeZone: activity.timeZone })} · {formatTime(instant, locale, activity.timeZone)}</p></div></div>
         {activity.notes.trim() ? <div className="reminder-notes"><span className="focus-label">{t("notes")}</span><p>{activity.notes}</p></div> : <p className="muted small-copy">{t("noNotes")}</p>}
-        <div className="dialog-actions"><button className="button secondary" onClick={onDismiss}>{t("reminderDismiss")}</button><button className="button primary" onClick={onComplete}>{t("complete")}</button></div>
+        <div className="dialog-actions">
+          <button className="button secondary" onClick={onDismiss}>{t("reminderDismiss")}</button>
+          <button className="button secondary" onClick={onSnooze}>{t("snooze")}</button>
+          <button className="button primary" onClick={onComplete}>{t("complete")}</button>
+        </div>
       </section>
     </div>
   );
@@ -359,6 +364,7 @@ export function App() {
 
   useEffect(() => {
     let active = true;
+    initAudioOnUserGesture();
     void initializeDatabase().then(async () => {
       await refresh();
       if (active && import.meta.env.DEV) {
@@ -380,7 +386,7 @@ export function App() {
     if (loading) return;
     let active = true;
     const scan = async () => {
-      if (!active || reminderScanActive.current || document.visibilityState === "hidden") return;
+      if (!active || reminderScanActive.current) return;
       reminderScanActive.current = true;
       try {
         const [legacyLedger, occurrenceLedger] = await Promise.all([database.reminderLedger.toArray(), database.occurrenceReminderLedger.toArray()]);
@@ -518,6 +524,23 @@ export function App() {
     } catch { setError(t("storageError")); }
   };
 
+  const snoozeOccurrence = async (occurrence: ScheduledOccurrence) => {
+    try {
+      const nextStart = addActivityMinutes(occurrence.startLocal, occurrence.timeZone, 5);
+      if (!occurrence.recurrence) {
+        const base = await database.activities.get(occurrence.id);
+        if (base) await saveActivity({ ...base, startLocal: nextStart });
+      } else {
+        const override: ActivityOccurrenceOverride = { id: occurrenceOverrideId(occurrence.id, occurrence.originalStartLocal), activityId: occurrence.id, originalStartLocal: occurrence.originalStartLocal, status: "postponed", startLocal: nextStart, updatedAt: new Date().toISOString() };
+        await database.occurrenceOverrides.put(override);
+        await refresh();
+        void bookingSync.current?.projectionChanged();
+      }
+      reminderInFlight.current.delete(occurrence.occurrenceKey);
+      setReminderQueue((queue) => queue.slice(1));
+    } catch { setError(t("storageError")); }
+  };
+
   const selectLanguage = async (nextLocale: Locale) => {
     if (!preferences) return;
     const next = { ...preferences, locale: nextLocale };
@@ -541,6 +564,34 @@ export function App() {
   const enableNotifications = async () => {
     const permission = await requestNotificationPermission();
     setNotice(permission === "granted" ? t("notificationEnabled") : permission === "denied" ? t("notificationDenied") : t("notificationUnsupported"));
+    if (permission === "granted") {
+      void registerPushSubscription();
+    }
+  };
+
+  const testReminderNow = async () => {
+    const testActivity: ScheduledActivity = {
+      id: "test-reminder-now",
+      typeId: "work",
+      title: "Test reminder alert",
+      symbol: "🔔",
+      startLocal: new Date().toISOString().slice(0, 16),
+      timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
+      durationMinutes: 15,
+      status: "scheduled",
+      notes: "This is a direct test of the Micro-Bot reminder system (sound, notification, vibration, and dialog).",
+      alertEnabled: true,
+      createdAt: new Date().toISOString(),
+    };
+    const occurrence: ScheduledOccurrence = {
+      ...testActivity,
+      occurrenceKey: `test-reminder-now@${testActivity.startLocal}`,
+      originalStartLocal: testActivity.startLocal,
+      seriesStartLocal: testActivity.startLocal,
+      seriesStatus: "scheduled",
+    };
+    setReminderQueue((queue) => [occurrence, ...queue]);
+    await deliverReminder(occurrence);
   };
 
   const dismissReminder = () => setReminderQueue((queue) => queue.slice(1));
@@ -567,6 +618,7 @@ export function App() {
         <div className="topbar-actions">
           <button className="profile-chip" onClick={() => setDialog({ kind: "profile" })} aria-label={t("location")}><span className="status-dot" />{preferences.city ? `${preferences.city}${preferences.country ? `, ${preferences.country}` : ""}` : t("addLocation")}</button>
           <button className="notification-button" onClick={() => void enableNotifications()}>{t("enableNotifications")}</button>
+          <button className="notification-button" onClick={() => void testReminderNow()}>{t("testReminder")}</button>
           <button className="notification-button" onClick={() => setBookingPanelOpen(true)}>{t("bookingManage")}</button>
           <div className="language-switch" aria-label={t("language")}><button aria-pressed={locale === "en"} onClick={() => void selectLanguage("en")}>EN</button><button aria-pressed={locale === "ar"} onClick={() => void selectLanguage("ar")}>ع</button></div>
         </div>
@@ -619,7 +671,7 @@ export function App() {
         await refresh();
         void bookingSync.current?.projectionChanged();
       }} />}
-      {activeReminder && <ReminderDialog activity={activeReminder} locale={locale} onDismiss={dismissReminder} onComplete={() => void completeReminder(activeReminder)} />}
+      {activeReminder && <ReminderDialog activity={activeReminder} locale={locale} onDismiss={dismissReminder} onComplete={() => void completeReminder(activeReminder)} onSnooze={() => void snoozeOccurrence(activeReminder)} />}
     </main>
   );
 }

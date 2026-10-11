@@ -11,6 +11,7 @@ import { BookingReminderDispatcher } from "./email/bookingReminderDispatcher";
 import { createConfiguredBookingMailer } from "./email/smtp";
 import type { BookingConfirmationMailer } from "./email/types";
 import { registerWeatherRoutes } from "./routes/weather";
+import { registerPushRoutes } from "./routes/push";
 import type { WeatherProviderOptions } from "./weather/metNorway";
 
 export interface ServerOptions {
@@ -42,6 +43,7 @@ export function createServer(db: Database.Database, options: ServerOptions = {})
     emailDispatcher,
   });
   registerWeatherRoutes(app, options.weather);
+  registerPushRoutes(app, db);
   if (options.startBookingEmailWorker) {
     app.addHook("onReady", async () => { emailDispatcher.start(); reminderDispatcher.start(); });
     app.addHook("onClose", async () => { reminderDispatcher.stop(); emailDispatcher.stop(); });

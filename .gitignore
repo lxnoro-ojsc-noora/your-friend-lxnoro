@@ -11,3 +11,4 @@ dist/
 .claude/
 agent/
 skills-lock.json
+/src/App.tsx.before-day-range-fix.bak

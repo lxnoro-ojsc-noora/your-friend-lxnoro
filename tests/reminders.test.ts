@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { dueActivities } from "../src/domain/reminders";
-import { localDateTime } from "../src/domain/time";
+import { localDateTime, addActivityMinutes } from "../src/domain/time";
 import type { ReminderLedgerEntry, ScheduledActivity } from "../src/domain/model";
 
 const scheduled = (overrides: Partial<ScheduledActivity> = {}): ScheduledActivity => ({
@@ -38,5 +38,16 @@ describe("local reminder due calculation", () => {
     const losAngeles = scheduled({ id: "los-angeles", startLocal: "2026-10-08T09:00", timeZone: "America/Los_Angeles" });
     const due = dueActivities([losAngeles, tokyo], [], localDateTime("2026-10-08", "18:00", "UTC"));
     expect(due.map(({ id }) => id)).toEqual(["tokyo", "los-angeles"]);
+  });
+
+  it("correctly identifies a breakfast reminder due at scheduled time (13:57)", () => {
+    const breakfast = scheduled({ id: "breakfast", title: "Breakfast time is now.", startLocal: "2026-10-11T13:57", timeZone: "Asia/Yerevan" });
+    const now = localDateTime("2026-10-11", "13:57", "Asia/Yerevan");
+    expect(dueActivities([breakfast], [], now).map(({ id }) => id)).toEqual(["breakfast"]);
+  });
+
+  it("calculates snooze time correctly (+5 minutes offset)", () => {
+    const snoozedTime = addActivityMinutes("2026-10-08T08:15", "Asia/Yerevan", 5);
+    expect(snoozedTime).toEqual("2026-10-08T08:20");
   });
 });
