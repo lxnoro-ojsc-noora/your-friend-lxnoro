@@ -39,7 +39,7 @@ Build mode: fast
   Learner check: Create a private activity, confirm only its necessary busy interval reaches the booking service, and verify the local title/note are absent while an overlapping booking check is rejected.
   Commit: `Validate privacy-safe booking projection boundary`
 
-- [ ] **4. Routines, recurrence, and all five planning horizons share one schedule**
+- [x] **4. Routines, recurrence, and all five planning horizons share one schedule**
   Becomes usable: The user can create routines and custom activity types, repeat activities with supported count/interval rules, complete or postpone instances, and navigate daily, weekly, monthly, yearly, and five-year views without losing context.
   Why now: Expands the proven daily kernel into the complete time system using the same domain model, instead of building disconnected calendar implementations.
   PRD ref: `prd.md > Time horizons and shared schedule model`, `prd.md > Starter activities, routines, tasks, and custom activities`, `prd.md > Time-matrix experience`, `prd.md > Responsive surfaces`
@@ -49,7 +49,7 @@ Build mode: fast
   Learner check: Create a recurring routine, complete or postpone one occurrence, then move through all five horizons and check that context and next activity remain understandable.
   Commit: `Add recurring routines and planning horizons`
 
-- [ ] **5. Optional weather context supports the selected location and fails gracefully**
+- [x] **5. Optional weather context supports the selected location and fails gracefully**
   Becomes usable: After the user enables weather and grants location permission, relevant forecast context can appear with attribution and freshness time; denied permission, missing network, or provider failure leaves planning intact.
   Why now: Weather is a contextual enhancement to the already working activity/reminder flow, not a dependency of the local core; the integration is isolated and permission-driven.
   PRD ref: `prd.md > Weather and contextual information`, `prd.md > Profile and preferences`, `prd.md > Localization, privacy, offline behavior, and AI boundaries`
