@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Your friend LXNORO — App Map & Architecture</title>
+  <style>
+    :root {
+      --bg: #090d16;
+      --card-bg: #121826;
+      --card-border: #1e293b;
+      --text: #f8fafc;
+      --text-muted: #94a3b8;
+      --accent: #a855f7;
+      --accent-glow: rgba(168, 85, 247, 0.15);
+      --success: #34d399;
+      --warning: #fbbf24;
+      --font-sans: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font-sans);
+      line-height: 1.6;
+      padding: 2rem;
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+    header {
+      border-bottom: 1px solid var(--card-border);
+      padding-bottom: 1.5rem;
+      margin-bottom: 2rem;
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+    }
+    .brand-mark {
+      background: linear-gradient(135deg, var(--accent), #6366f1);
+      color: #fff;
+      font-weight: 700;
+      width: 48px;
+      height: 48px;
+      border-radius: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.25rem;
+      box-shadow: 0 4px 12px var(--accent-glow);
+    }
+    h1 { font-size: 1.875rem; font-weight: 700; letter-spacing: -0.025em; }
+    p.subtitle { color: var(--text-muted); font-size: 0.95rem; }
+    
+    section {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 12px;
+      padding: 1.75rem;
+      margin-bottom: 1.75rem;
+      box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.1);
+    }
+    h2 {
+      font-size: 1.25rem;
+      font-weight: 600;
+      color: var(--text);
+      margin-bottom: 1rem;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+    h2::before {
+      content: "";
+      display: inline-block;
+      width: 6px;
+      height: 18px;
+      background: var(--accent);
+      border-radius: 3px;
+    }
+    p, li { color: var(--text-muted); font-size: 0.95rem; margin-bottom: 0.75rem; }
+    ul { padding-left: 1.5rem; }
+    strong { color: var(--text); }
+    
+    .grid-2 {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 1.25rem;
+      margin-top: 1rem;
+    }
+    .card {
+      background: rgba(30, 41, 59, 0.5);
+      border: 1px solid var(--card-border);
+      border-radius: 8px;
+      padding: 1.25rem;
+    }
+    .card h3 {
+      font-size: 1rem;
+      font-weight: 600;
+      color: var(--text);
+      margin-bottom: 0.5rem;
+    }
+    
+    .flow-box {
+      font-family: var(--font-mono);
+      background: #060911;
+      border: 1px solid var(--card-border);
+      border-radius: 8px;
+      padding: 1.25rem;
+      font-size: 0.85rem;
+      color: #cbd5e1;
+      overflow-x: auto;
+      white-space: pre;
+      margin: 1rem 0;
+    }
+    
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 1rem;
+      font-size: 0.9rem;
+    }
+    th, td {
+      border: 1px solid var(--card-border);
+      padding: 0.75rem 1rem;
+      text-align: left;
+    }
+    th {
+      background: rgba(30, 41, 59, 0.8);
+      color: var(--text);
+      font-weight: 600;
+    }
+    td { color: var(--text-muted); }
+    td strong { color: var(--text); }
+    
+    .badge {
+      display: inline-block;
+      padding: 0.2rem 0.5rem;
+      border-radius: 4px;
+      font-size: 0.75rem;
+      font-weight: 600;
+      text-transform: uppercase;
+    }
+    .badge.implemented { background: rgba(52, 211, 153, 0.15); color: var(--success); border: 1px solid rgba(52, 211, 153, 0.3); }
+    .badge.planned { background: rgba(251, 191, 36, 0.15); color: var(--warning); border: 1px solid rgba(251, 191, 36, 0.3); }
+
+    footer {
+      text-align: center;
+      margin-top: 3rem;
+      padding-top: 1.5rem;
+      border-top: 1px solid var(--card-border);
+      color: var(--text-muted);
+      font-size: 0.85rem;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="brand-mark">LX</div>
+    <div>
+      <h1>Your friend LXNORO</h1>
+      <p class="subtitle">Application Map, Architecture & Technical Specifications</p>
+    </div>
+  </header>
+
+  <section>
+    <h2>1. Application Purpose & High-Level Architecture</h2>
+    <p><strong>Your friend LXNORO</strong> is a lightweight personal digital companion and Micro-Bot Time Engine designed to connect long-range personal planning horizons (from day to five years) with timely, actionable daily moments. It consolidates routines, scheduled tasks, expandable notes, Micro-Bot reminders, MET Norway weather context, and a privacy-conscious shared booking service into one cohesive web platform.</p>
+    <div class="grid-2">
+      <div class="card">
+        <h3>Local-First Client (React + Vite + Dexie)</h3>
+        <p>Handles personal time matrices, multi-horizon navigation, activity/routine scheduling, substantial notes (up to 1,000 words), MET Norway weather preference/caching, in-app/browser notifications, and Firebase Google authentication state.</p>
+      </div>
+      <div class="card">
+        <h3>Privacy-Safe Booking Server (Fastify + SQLite)</h3>
+        <p>Manages authenticated owner availability projection sync (interval-only, zero private task IDs/titles/notes), public availability queries, shared booking requests, owner approvals/rejections, alternative time proposals, and Nodemailer SMTP confirmation emails.</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>2. Actual Screens & Major UI Areas</h2>
+    <ul>
+      <li><strong>Google Sign-In / Dark Login Screen:</strong> Renders a secure authentication barrier when signed out, featuring the brand lockup and a <strong>Continue with Google</strong> button powered by Firebase Auth (with fallback error handling if Firebase configuration is missing).</li>
+      <li><strong>Topbar & Navigation:</strong> Displays the brand lockup, location chip, notification/reminder test triggers, booking management panel toggle, Sign Out button, and English/Arabic (LTR/RTL) language switchers.</li>
+      <li><strong>Time Matrix & Horizon Selector:</strong> Horizontal timeline grid supporting daily, weekly, monthly, yearly, and five-year planning horizons with "Now" and "Next" indicators.</li>
+      <li><strong>Weather Context Banner:</strong> Displays rounded-coordinate temperature, symbol, precipitation, attribution, and freshness status when weather is enabled and permission is granted.</li>
+      <li><strong>Starter Activities & Custom Editor:</strong> Visible unscheduled starter templates and custom activity creators allowing emoji selection, title, date, time, duration, recurrence rules, and expandable notes.</li>
+      <li><strong>Micro-Bot Reminder Dialog:</strong> Pops up when an activity is due, revealing its symbol, title, full notes, and completion/snooze actions.</li>
+      <li><strong>Owner Booking Panel:</strong> Interface for managing booking links, reviewing pending requests, approving/rejecting, and proposing alternative slots.</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>3. Core User Flows</h2>
+    <div class="flow-box">
+[Authentication Flow]
+[App Open] ---> [Check Firebase Auth State] ---> (Signed Out) ---> [Dark Login Screen + Continue with Google] ---> [Popup Sign-In] ---> [Signed In State]
+                                              ---> (Signed In)  ---> [Load Local Dexie DB & Preferences] ---> [Time Matrix UI]
+
+[Personal Time Planning Flow]
+[Time Matrix / Horizon View] ---> [Create/Schedule Activity or Routine] ---> [Set Date/Time/Recurrence/Notes] 
+                             ---> [Dexie Local Persistence] ---> [Micro-Bot Reminder at Due Time] ---> [Complete / Postpone]
+
+[Shared Appointment Booking Flow]
+[Owner Sync Busy Intervals] ---> [Public Shareable Link] ---> [Requester Selects Slot] ---> [Pending Request Created in SQLite]
+                            ---> [Owner Approval / Alternative Proposal] ---> [Conflict Recheck & SQLite Confirmation] ---> [Nodemailer SMTP Email Sent]
+    </div>
+  </section>
+
+  <section>
+    <h2>4. Main Source Files & Responsibilities</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>File Path</th>
+          <th>Primary Responsibility</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><code>src/App.tsx</code></td>
+          <td>Main React application component: topbar, auth state subscription, time matrix view, horizons, dialogs, and event handlers.</td>
+        </tr>
+        <tr>
+          <td><code>src/platform/firebase.ts</code></td>
+          <td>Firebase app initialization, Google Auth provider, popup sign-in, sign-out, and auth state change subscription.</td>
+        </tr>
+        <tr>
+          <td><code>src/data/database.ts</code></td>
+          <td>Dexie IndexedDB database definition for activities, recurrence overrides, types, preferences, and reminder ledgers.</td>
+        </tr>
+        <tr>
+          <td><code>src/domain/recurrence.ts</code></td>
+          <td>Recurrence rule parsing, expansion, and wall-clock/IANA timezone occurrence calculations.</td>
+        </tr>
+        <tr>
+          <td><code>src/domain/reminders.ts</code></td>
+          <td>Due instance calculations and Micro-Bot reminder trigger logic.</td>
+        </tr>
+        <tr>
+          <td><code>src/platform/reminderDelivery.ts</code></td>
+          <td>Browser Notification API adapter, audio synthesis, vibration, and push subscription handling.</td>
+        </tr>
+        <tr>
+          <td><code>server/app.ts</code></td>
+          <td>Fastify API server bootstrap, owner authentication, and database repository wiring.</td>
+        </tr>
+        <tr>
+          <td><code>server/db/repositories/*.ts</code></td>
+          <td>SQLite repositories for bookings, booking emails, booking reminders, busy intervals, and push subscriptions.</td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section>
+    <h2>5. Data Flow & Integrations</h2>
+    <ul>
+      <li><strong>Local-First Storage:</strong> Personal schedules, routine definitions, notes, and preferences reside entirely on-device in IndexedDB (Dexie). No private task titles or notes ever leave the device.</li>
+      <li><strong>Privacy-Safe Booking Projection:</strong> Scheduled activities produce anonymous, coalesced busy time intervals synchronized with the Fastify/SQLite booking backend solely for conflict detection.</li>
+      <li><strong>Weather Integration:</strong> Optional location-based MET Norway Locationforecast 2.0 requests via the LXNORO proxy with coordinate rounding, local caching, and attribution.</li>
+      <li><strong>Transactional Email:</strong> Nodemailer SMTP relay integration for booking confirmations and owner reminders.</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>6. Implemented vs. Planned Functionality</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Feature / Capability</th>
+          <th>Status</th>
+          <th>Evidence / Notes</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Firebase Google Sign-In & Auth State Subscription</td>
+          <td><span class="badge implemented">Implemented</span></td>
+          <td>Fully integrated client-side in <code>src/platform/firebase.ts</code> and <code>src/App.tsx</code> to gate the React UI. Note that the Fastify backend does not implement server-side Firebase ID-token verification; local development owner authentication relies on a dev-only header and must not be presented as production-grade authentication.</td>
+        </tr>
+        <tr>
+          <td>Local-First Time Matrix & 5 Planning Horizons</td>
+          <td><span class="badge implemented">Implemented</span></td>
+          <td>Daily, weekly, monthly, yearly, and five-year views operational with Dexie persistence.</td>
+        </tr>
+        <tr>
+          <td>Micro-Bot Reminders & Substantial Notes</td>
+          <td><span class="badge implemented">Implemented</span></td>
+          <td>Alerts, collapsible/expandable notes (up to 1,000 words), and notification/audio delivery.</td>
+        </tr>
+        <tr>
+          <td>Privacy-Safe Booking Projection & SQLite Server</td>
+          <td><span class="badge implemented">Implemented</span></td>
+          <td>Fastify backend with interval-only sync and conflict checking.</td>
+        </tr>
+        <tr>
+          <td>Shared Appointment Approval & SMTP Emails</td>
+          <td><span class="badge implemented">Implemented</span></td>
+          <td>Pending requests, owner approval/rejection, alternative proposals, and Nodemailer dispatch.</td>
+        </tr>
+        <tr>
+          <td>Dedicated Native Mobile Application (iOS/Android)</td>
+          <td><span class="badge planned">Planned</span></td>
+          <td>Architecture supports future mobile wrappers, but current implementation is strictly a responsive web platform.</td>
+        </tr>
+        <tr>
+          <td>Hardware Smartwatch App Deployment</td>
+          <td><span class="badge planned">Planned</span></td>
+          <td>Designed for round/square viewports in web UI; physical smartwatch firmware/app packaging not implemented.</td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+
+  <footer>
+    <p>Your friend LXNORO &mdash; Architecture App Map &bull; Generated for Devpost &amp; Technical Review</p>
+  </footer>
+</body>
+</html>
