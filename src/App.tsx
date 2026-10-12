@@ -15,6 +15,8 @@ import { confirmedAppointmentToActivityList } from "./domain/confirmedAppointmen
 import { OwnerBookingPanel } from "./components/BookingViews";
 import { fetchConfirmedAppointmentProjections } from "./platform/bookingApi";
 import { replaceConfirmedAppointmentSnapshot } from "./data/confirmedAppointments";
+import { signInWithGoogle, subscribeToAuthChanges, logOutUser, isFirebaseConfigured } from "./platform/firebase";
+import type { User } from "firebase/auth";
 
 const horizonLabels: Record<Horizon, MessageKey> = {
   day: "day",
@@ -315,6 +317,17 @@ function HorizonMatrix({ horizon, anchor, activities, locale, onSelect }: {
 }
 
 export function App() {
+  const [user, setUser] = useState<User | null>(null);
+  const [authLoading, setAuthLoading] = useState(true);
+
+  useEffect(() => {
+    const unsubscribe = subscribeToAuthChanges((currentUser) => {
+      setUser(currentUser);
+      setAuthLoading(false);
+    });
+    return () => unsubscribe();
+  }, []);
+
   const [types, setTypes] = useState<ActivityType[]>([]);
   const [activities, setActivities] = useState<ScheduledActivity[]>([]);
   const [occurrenceOverrides, setOccurrenceOverrides] = useState<ActivityOccurrenceOverride[]>([]);
@@ -609,6 +622,55 @@ export function App() {
     activity,
   });
 
+  if (authLoading) return <main className="loading-shell"><span className="brand-mark">LX</span><p>{translate("en", "loading")}</p></main>;
+
+  if (!user) {
+    return (
+      <main className="app-shell" style={{ background: "#0a0f1d", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: "100vh", color: "#f8fafc" }}>
+        <div style={{ textAlign: "center", maxWidth: "400px", padding: "2rem" }}>
+          <span className="brand-mark" style={{ fontSize: "3rem", display: "inline-block", marginBottom: "1rem" }}>LX</span>
+          <h1 style={{ fontSize: "1.75rem", marginBottom: "0.5rem", fontWeight: 600 }}>{t("product")}</h1>
+          <p style={{ color: "#94a3b8", marginBottom: "2rem" }}>Sign in to continue to your companion.</p>
+          {isFirebaseConfigured ? (
+            <button
+              onClick={async () => {
+                try {
+                  await signInWithGoogle();
+                } catch (err) {
+                  setError(err instanceof Error ? err.message : "Failed to sign in with Google");
+                }
+              }}
+              style={{
+                background: "#ffffff",
+                color: "#0f172a",
+                border: "none",
+                borderRadius: "8px",
+                padding: "0.75rem 1.5rem",
+                fontSize: "1rem",
+                fontWeight: 600,
+                cursor: "pointer",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: "0.75rem",
+                width: "100%",
+                boxShadow: "0 4px 6px -1px rgba(0, 0, 0, 0.1)"
+              }}
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24"><path fill="#4285F4" d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.66-5.17 3.66-9.17z"/><path fill="#34A853" d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.05c-1.08.72-2.45 1.16-4.05 1.16-3.13 0-5.78-2.11-6.73-4.96H1.19v3.15C3.21 21.32 7.27 24 12 24z"/><path fill="#FBBC05" d="M5.27 14.24c-.25-.72-.39-1.49-.39-2.24s.14-1.52.39-2.24V6.61H1.19C.43 8.13 0 9.87 0 11.7c0 1.83.43 3.57 1.19 5.09l4.08-2.55z"/><path fill="#EA4335" d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.27 0 3.21 2.68 1.19 6.61l4.08 3.15c.95-2.85 3.6-4.96 6.73-4.96z"/></svg>
+              Continue with Google
+            </button>
+          ) : (
+            <div style={{ background: "#1e293b", color: "#f87171", padding: "1rem", borderRadius: "8px", fontSize: "0.875rem", border: "1px solid #334155" }}>
+              Firebase configuration is missing. Please check your environment variables.
+            </div>
+          )}
+          {error && <p style={{ color: "#f87171", marginTop: "1rem", fontSize: "0.875rem" }}>{error}</p>}
+        </div>
+      </main>
+    );
+  }
+
   if (loading || !preferences) return <main className="loading-shell"><span className="brand-mark">LX</span><p>{translate("en", "loading")}</p></main>;
 
   return (
@@ -620,6 +682,7 @@ export function App() {
           <button className="notification-button" onClick={() => void enableNotifications()}>{t("enableNotifications")}</button>
           <button className="notification-button" onClick={() => void testReminderNow()}>{t("testReminder")}</button>
           <button className="notification-button" onClick={() => setBookingPanelOpen(true)}>{t("bookingManage")}</button>
+          <button className="notification-button" onClick={() => void logOutUser()}>Sign Out</button>
           <div className="language-switch" aria-label={t("language")}><button aria-pressed={locale === "en"} onClick={() => void selectLanguage("en")}>EN</button><button aria-pressed={locale === "ar"} onClick={() => void selectLanguage("ar")}>ع</button></div>
         </div>
       </header>
