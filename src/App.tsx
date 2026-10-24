@@ -132,6 +132,86 @@ function ActivityDialog({
   const noteWords = notes.trim() ? notes.trim().split(/\s+/u).length : 0;
 
   if (kind === "profile") {
+    const handleExportBackup = async () => {
+      try {
+        const backup = {
+          version: 1,
+          exportedAt: new Date().toISOString(),
+          tables: {
+            activityTypes: await database.activityTypes.toArray(),
+            activities: await database.activities.toArray(),
+            preferences: await database.preferences.toArray(),
+            reminderLedger: await database.reminderLedger.toArray(),
+            bookingSyncOutbox: await database.bookingSyncOutbox.toArray(),
+            occurrenceOverrides: await database.occurrenceOverrides.toArray(),
+            occurrenceReminderLedger: await database.occurrenceReminderLedger.toArray(),
+            weatherCache: await database.weatherCache.toArray(),
+            confirmedBookingAppointments: await database.confirmedBookingAppointments.toArray(),
+          }
+        };
+        const blob = new Blob([JSON.stringify(backup, null, 2)], { type: "application/json" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `lxnoro-backup-${new Date().toISOString().slice(0, 10)}.json`;
+        a.click();
+        URL.revokeObjectURL(url);
+      } catch (err) {
+        console.error("Export backup error:", err);
+        alert("Failed to export backup");
+      }
+    };
+
+    const handleImportBackup = async (event: React.ChangeEvent<HTMLInputElement>) => {
+      const file = event.target.files?.[0];
+      if (!file) return;
+      if (!window.confirm("Importing a backup will replace your current local data on this device. Do you want to continue?")) {
+        event.target.value = "";
+        return;
+      }
+      try {
+        const text = await file.text();
+        const data = JSON.parse(text);
+        if (!data || typeof data !== "object" || !data.tables) {
+          throw new Error("Invalid backup file format");
+        }
+        const t = data.tables;
+        const tables = [
+          database.activityTypes,
+          database.activities,
+          database.preferences,
+          database.reminderLedger,
+          database.bookingSyncOutbox,
+          database.occurrenceOverrides,
+          database.occurrenceReminderLedger,
+          database.weatherCache,
+          database.confirmedBookingAppointments,
+        ];
+        await database.transaction(
+          "rw",
+          tables,
+          async () => {
+            if (Array.isArray(t.activityTypes)) { await database.activityTypes.clear(); await database.activityTypes.bulkPut(t.activityTypes); }
+            if (Array.isArray(t.activities)) { await database.activities.clear(); await database.activities.bulkPut(t.activities); }
+            if (Array.isArray(t.preferences)) { await database.preferences.clear(); await database.preferences.bulkPut(t.preferences); }
+            if (Array.isArray(t.reminderLedger)) { await database.reminderLedger.clear(); await database.reminderLedger.bulkPut(t.reminderLedger); }
+            if (Array.isArray(t.bookingSyncOutbox)) { await database.bookingSyncOutbox.clear(); await database.bookingSyncOutbox.bulkPut(t.bookingSyncOutbox); }
+            if (Array.isArray(t.occurrenceOverrides)) { await database.occurrenceOverrides.clear(); await database.occurrenceOverrides.bulkPut(t.occurrenceOverrides); }
+            if (Array.isArray(t.occurrenceReminderLedger)) { await database.occurrenceReminderLedger.clear(); await database.occurrenceReminderLedger.bulkPut(t.occurrenceReminderLedger); }
+            if (Array.isArray(t.weatherCache)) { await database.weatherCache.clear(); await database.weatherCache.bulkPut(t.weatherCache); }
+            if (Array.isArray(t.confirmedBookingAppointments)) { await database.confirmedBookingAppointments.clear(); await database.confirmedBookingAppointments.bulkPut(t.confirmedBookingAppointments); }
+          }
+        );
+        alert("Backup restored successfully!");
+        window.location.reload();
+      } catch (err) {
+        console.error("Import backup error:", err);
+        alert(err instanceof Error ? err.message : "Failed to import backup");
+      } finally {
+        event.target.value = "";
+      }
+    };
+
     return (
       <div className="dialog-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
         <section className="dialog-card" role="dialog" aria-modal="true" aria-labelledby="dialog-title">
@@ -140,6 +220,17 @@ function ActivityDialog({
           <label>{t("city")}<input value={city} onChange={(event) => setCity(event.target.value)} maxLength={80} /></label>
           <label className="alert-toggle"><input type="checkbox" checked={preferences?.weatherEnabled === true} onChange={(event) => void onWeatherToggle(event.target.checked)} />{t("weatherEnabled")}</label>
           <p className="muted small-copy">{t("weatherLater")}</p>
+          <div style={{ marginTop: "1rem", borderTop: "1px solid rgba(255,255,255,0.1)", paddingTop: "1rem" }}>
+            <h3 style={{ fontSize: "14px", marginBottom: "8px", color: "#f8fafc" }}>Local Backup & Restore</h3>
+            <p className="muted small-copy" style={{ marginBottom: "10px" }}>Export all your local plans and settings to a JSON file, or restore from a previous backup.</p>
+            <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+              <button className="button secondary" onClick={() => void handleExportBackup()}>Export Backup</button>
+              <label className="button secondary" style={{ display: "inline-flex", alignItems: "center", cursor: "pointer", margin: 0 }}>
+                Import Backup
+                <input type="file" accept=".json" style={{ display: "none" }} onChange={(e) => void handleImportBackup(e)} />
+              </label>
+            </div>
+          </div>
           <div className="dialog-actions"><button className="button secondary" onClick={onClose}>{t("cancel")}</button><button className="button primary" onClick={() => { window.dispatchEvent(new CustomEvent("lxnoro:profile", { detail: { country, city } })); onClose(); }}>{t("save")}</button></div>
         </section>
       </div>
