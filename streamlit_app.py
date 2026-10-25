@@ -225,10 +225,15 @@ cursor.execute("SELECT * FROM demo_activities WHERE horizon = ? ORDER BY date AS
 rows = cursor.fetchall()
 conn.close()
 
-# Filter out expired one-time activities (keep routines regardless of date)
+# Filter out expired one-time activities and deduplicate by ID
 now_dt = datetime.now()
+seen_ids = set()
 valid_rows = []
 for row in rows:
+    if row["id"] in seen_ids:
+        continue
+    seen_ids.add(row["id"])
+
     is_routine = row["is_routine"] if "is_routine" in row.keys() else 0
     if is_routine == 0:
         try:
@@ -250,23 +255,11 @@ else:
         is_routine_flag = row["is_routine"] if "is_routine" in row.keys() else 0
         rec_freq = row["recurrence_freq"] if "recurrence_freq" in row.keys() else "none"
         routine_badge = f'<span class="badge routine-badge" style="margin-left: 0.4rem;">🔄 Routine ({rec_freq})</span>' if is_routine_flag == 1 else ''
+        title_display = row['title'].strip() if (row['title'] and row['title'].strip()) else "Untitled"
+        notes_display = row['notes'].strip() if (row['notes'] and row['notes'].strip()) else "No notes provided."
         
-        st.markdown(f"""
-        <div class="horizon-card">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.4rem;">
-                <div>
-                    <span style="font-size: 1.25rem; margin-right: 0.5rem;">{row['symbol']}</span>
-                    <strong style="font-size: 1.1rem; color: #f8fafc;">{row['title']}</strong>
-                    {routine_badge}
-                </div>
-                <div>
-                    <span class="badge">🕒 {row['time']} ({row['duration']}m)</span>
-                    <span class="badge" style="margin-left: 0.4rem;">📅 {row['date']}</span>
-                </div>
-            </div>
-            <p style="color: #94a3b8; font-size: 0.9rem; margin: 0; white-space: pre-wrap;">{row['notes'] or 'No notes provided.'}</p>
-        </div>
-        """, unsafe_allow_html=True)
+        card_html = f'<div class="horizon-card"><div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.4rem;"><div><span style="font-size: 1.25rem; margin-right: 0.5rem;">{row["symbol"]}</span><strong style="font-size: 1.1rem; color: #f8fafc;">{title_display}</strong>{routine_badge}</div><div><span class="badge">🕒 {row["time"]} ({row["duration"]}m)</span><span class="badge" style="margin-left: 0.4rem;">📅 {row["date"]}</span></div></div><p style="color: #94a3b8; font-size: 0.9rem; margin: 0; white-space: pre-wrap;">{notes_display}</p></div>'
+        st.markdown(card_html, unsafe_allow_html=True)
         
         col_e, col_d, col_s = st.columns([1, 1, 4])
         with col_e:
