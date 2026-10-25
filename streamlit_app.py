@@ -218,18 +218,76 @@ for i, (hz_key, hz_label) in enumerate(horizons.items()):
 
 st.markdown('</div>', unsafe_allow_html=True)
 
-# Fetch activities for selected horizon in chronological order (date ASC, time ASC)
+# Helper function for robust recurrence and horizon evaluation
+def matches_horizon(row, selected_horizon, today_dt):
+    act_date_str = row["date"]
+    is_routine = row["is_routine"] if "is_routine" in row.keys() else 0
+    rec_freq = row["recurrence_freq"] if "recurrence_freq" in row.keys() else "none"
+
+    try:
+        act_dt = datetime.strptime(act_date_str, "%Y-%m-%d")
+    except:
+        act_dt = today_dt
+
+    today_str = today_dt.strftime("%Y-%m-%d")
+
+    # 1. Routine recurrence evaluation rules
+    if is_routine == 1:
+        if rec_freq == "daily":
+            return True
+        elif rec_freq == "weekly":
+            if selected_horizon == "day":
+                return act_dt.weekday() == today_dt.weekday()
+            return True
+        elif rec_freq == "monthly":
+            if selected_horizon == "day":
+                return act_dt.day == today_dt.day
+            elif selected_horizon == "week":
+                return True
+            return True
+        elif rec_freq == "yearly":
+            if selected_horizon == "day":
+                return act_dt.month == today_dt.month and act_dt.day == today_dt.day
+            elif selected_horizon in ("week", "month"):
+                return act_dt.month == today_dt.month
+            return True
+        else:
+            return row["horizon"] == selected_horizon
+
+    # 2. One-time activity date range filtering
+    if selected_horizon == "day":
+        return act_date_str == today_str
+    elif selected_horizon == "week":
+        delta_days = (act_dt.date() - today_dt.date()).days
+        return 0 <= delta_days < 7
+    elif selected_horizon == "month":
+        return act_dt.year == today_dt.year and act_dt.month == today_dt.month
+    elif selected_horizon == "year":
+        return act_dt.year == today_dt.year
+    elif selected_horizon == "fiveYears":
+        year_diff = act_dt.year - today_dt.year
+        return 0 <= year_diff <= 5
+    else:
+        return row["horizon"] == selected_horizon
+
+# Fetch all activities and filter by horizon/date rules in chronological order (date ASC, time ASC)
 conn = get_db()
 cursor = conn.cursor()
-cursor.execute("SELECT * FROM demo_activities WHERE horizon = ? ORDER BY date ASC, time ASC", (selected_horizon,))
+cursor.execute("SELECT * FROM demo_activities ORDER BY date ASC, time ASC")
 rows = cursor.fetchall()
 conn.close()
+
+today_dt = datetime.now()
+horizon_filtered_rows = []
+for row in rows:
+    if matches_horizon(row, selected_horizon, today_dt):
+        horizon_filtered_rows.append(row)
 
 # Filter out expired one-time activities and deduplicate by ID
 now_dt = datetime.now()
 seen_ids = set()
 valid_rows = []
-for row in rows:
+for row in horizon_filtered_rows:
     if row["id"] in seen_ids:
         continue
     seen_ids.add(row["id"])
