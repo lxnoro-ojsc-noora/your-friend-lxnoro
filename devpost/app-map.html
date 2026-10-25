@@ -158,21 +158,21 @@
     <div class="brand-mark">LX</div>
     <div>
       <h1>Your friend LXNORO</h1>
-      <p class="subtitle">Application Map, Architecture & Technical Specifications</p>
+      <p class="subtitle">Application Map, Architecture & Technical Specifications (Current MVP)</p>
     </div>
   </header>
 
   <section>
     <h2>1. Application Purpose & High-Level Architecture</h2>
-    <p><strong>Your friend LXNORO</strong> is a lightweight personal digital companion and Micro-Bot Time Engine designed to connect long-range personal planning horizons (from day to five years) with timely, actionable daily moments. It consolidates routines, scheduled tasks, expandable notes, Micro-Bot reminders, MET Norway weather context, and a privacy-conscious shared booking service into one cohesive web platform.</p>
+    <p><strong>Your friend LXNORO</strong> is a lightweight personal digital companion and Time Engine designed to connect long-range personal planning horizons (Daily, Weekly, Monthly, Yearly, Five-Year) with timely, actionable daily moments. The current runnable MVP is implemented in Python using Streamlit (<code>streamlit_app.py</code>) backed by local SQLite storage.</p>
     <div class="grid-2">
       <div class="card">
-        <h3>Local-First Client (React + Vite + Dexie)</h3>
-        <p>Handles personal time matrices, multi-horizon navigation, activity/routine scheduling, substantial notes (up to 1,000 words), MET Norway weather preference/caching, in-app/browser notifications, and Firebase Google authentication state.</p>
+        <h3>Streamlit MVP App (<code>streamlit_app.py</code>)</h3>
+        <p>Provides the primary runnable interface for multi-horizon navigation, activity and routine management, precise date-aware recurrence filtering, local SQLite data persistence, and JSON backup export/restore.</p>
       </div>
       <div class="card">
-        <h3>Privacy-Safe Booking Server (Fastify + SQLite)</h3>
-        <p>Manages authenticated owner availability projection sync (interval-only, zero private task IDs/titles/notes), public availability queries, shared booking requests, owner approvals/rejections, alternative time proposals, and Nodemailer SMTP confirmation emails.</p>
+        <h3>Foundation & Roadmap Architecture (<code>src/</code> & <code>server/</code>)</h3>
+        <p>Modular TypeScript/React frontend and Fastify/SQLite backend codebases representing the broader architecture roadmap for shared booking, weather proxy, and notification services.</p>
       </div>
     </div>
   </section>
@@ -180,30 +180,22 @@
   <section>
     <h2>2. Actual Screens & Major UI Areas</h2>
     <ul>
-      <li><strong>Google Sign-In / Dark Login Screen:</strong> Renders a secure authentication barrier when signed out, featuring the brand lockup and a <strong>Continue with Google</strong> button powered by Firebase Auth (with fallback error handling if Firebase configuration is missing).</li>
-      <li><strong>Topbar & Navigation:</strong> Displays the brand lockup, location chip, notification/reminder test triggers, booking management panel toggle, Sign Out button, and English/Arabic (LTR/RTL) language switchers.</li>
-      <li><strong>Time Matrix & Horizon Selector:</strong> Horizontal timeline grid supporting daily, weekly, monthly, yearly, and five-year planning horizons with "Now" and "Next" indicators.</li>
-      <li><strong>Weather Context Banner:</strong> Displays rounded-coordinate temperature, symbol, precipitation, attribution, and freshness status when weather is enabled and permission is granted.</li>
-      <li><strong>Starter Activities & Custom Editor:</strong> Visible unscheduled starter templates and custom activity creators allowing emoji selection, title, date, time, duration, recurrence rules, and expandable notes.</li>
-      <li><strong>Micro-Bot Reminder Dialog:</strong> Pops up when an activity is due, revealing its symbol, title, full notes, and completion/snooze actions.</li>
-      <li><strong>Owner Booking Panel:</strong> Interface for managing booking links, reviewing pending requests, approving/rejecting, and proposing alternative slots.</li>
+      <li><strong>Top Header & Live Clock:</strong> Displays brand identity and a real-time updating browser clock.</li>
+      <li><strong>Planning Horizons Selector:</strong> Five interactive navigation buttons for Daily, Weekly, Monthly, Yearly, and Five-Year planning views.</li>
+      <li><strong>Scheduled Tasks & Activities Panel:</strong> Displays filtered, chronologically ordered tasks and routines for the active horizon, with inline editing and deletion.</li>
+      <li><strong>Activity & Element Grid:</strong> 16 quick starter elements that can be scheduled instantly into the active horizon.</li>
+      <li><strong>Sidebar Custom Task & Backup Panel:</strong> Form to schedule custom tasks/routines and export/import JSON database backups.</li>
     </ul>
   </section>
 
   <section>
     <h2>3. Core User Flows</h2>
     <div class="flow-box">
-[Authentication Flow]
-[App Open] ---> [Check Firebase Auth State] ---> (Signed Out) ---> [Dark Login Screen + Continue with Google] ---> [Popup Sign-In] ---> [Signed In State]
-                                              ---> (Signed In)  ---> [Load Local Dexie DB & Preferences] ---> [Time Matrix UI]
-
 [Personal Time Planning Flow]
-[Time Matrix / Horizon View] ---> [Create/Schedule Activity or Routine] ---> [Set Date/Time/Recurrence/Notes] 
-                             ---> [Dexie Local Persistence] ---> [Micro-Bot Reminder at Due Time] ---> [Complete / Postpone]
-
-[Shared Appointment Booking Flow]
-[Owner Sync Busy Intervals] ---> [Public Shareable Link] ---> [Requester Selects Slot] ---> [Pending Request Created in SQLite]
-                            ---> [Owner Approval / Alternative Proposal] ---> [Conflict Recheck & SQLite Confirmation] ---> [Nodemailer SMTP Email Sent]
+[Launch Streamlit MVP] ---> [Select Horizon (Daily/Weekly/Monthly/Yearly/Five-Year)] 
+                      ---> [Schedule from Starter Grid or Add Custom Routine/Task]
+                      ---> [SQLite Local Persistence (.data/streamlit_demo.sqlite)]
+                      ---> [Date-Aware Recurrence & Horizon Filtering] ---> [JSON Backup / Restore]
     </div>
   </section>
 
@@ -218,53 +210,31 @@
       </thead>
       <tbody>
         <tr>
-          <td><code>src/App.tsx</code></td>
-          <td>Main React application component: topbar, auth state subscription, time matrix view, horizons, dialogs, and event handlers.</td>
+          <td><code>streamlit_app.py</code></td>
+          <td>Runnable MVP application: database init, UI styling, horizon switching, recurrence filtering, CRUD, starter grid, and backup/restore.</td>
         </tr>
         <tr>
-          <td><code>src/platform/firebase.ts</code></td>
-          <td>Firebase app initialization, Google Auth provider, popup sign-in, sign-out, and auth state change subscription.</td>
+          <td><code>requirements.txt</code></td>
+          <td>Python dependencies (Streamlit).</td>
         </tr>
         <tr>
-          <td><code>src/data/database.ts</code></td>
-          <td>Dexie IndexedDB database definition for activities, recurrence overrides, types, preferences, and reminder ledgers.</td>
-        </tr>
-        <tr>
-          <td><code>src/domain/recurrence.ts</code></td>
-          <td>Recurrence rule parsing, expansion, and wall-clock/IANA timezone occurrence calculations.</td>
-        </tr>
-        <tr>
-          <td><code>src/domain/reminders.ts</code></td>
-          <td>Due instance calculations and Micro-Bot reminder trigger logic.</td>
-        </tr>
-        <tr>
-          <td><code>src/platform/reminderDelivery.ts</code></td>
-          <td>Browser Notification API adapter, audio synthesis, vibration, and push subscription handling.</td>
+          <td><code>README.md</code></td>
+          <td>Project documentation separating current MVP from planned roadmap.</td>
         </tr>
         <tr>
           <td><code>server/app.ts</code></td>
-          <td>Fastify API server bootstrap, owner authentication, and database repository wiring.</td>
+          <td>Fastify API server foundation (planned roadmap).</td>
         </tr>
         <tr>
-          <td><code>server/db/repositories/*.ts</code></td>
-          <td>SQLite repositories for bookings, booking emails, booking reminders, busy intervals, and push subscriptions.</td>
+          <td><code>src/App.tsx</code></td>
+          <td>React frontend client foundation (planned roadmap).</td>
         </tr>
       </tbody>
     </table>
   </section>
 
   <section>
-    <h2>5. Data Flow & Integrations</h2>
-    <ul>
-      <li><strong>Local-First Storage:</strong> Personal schedules, routine definitions, notes, and preferences reside entirely on-device in IndexedDB (Dexie). No private task titles or notes ever leave the device.</li>
-      <li><strong>Privacy-Safe Booking Projection:</strong> Scheduled activities produce anonymous, coalesced busy time intervals synchronized with the Fastify/SQLite booking backend solely for conflict detection.</li>
-      <li><strong>Weather Integration:</strong> Optional location-based MET Norway Locationforecast 2.0 requests via the LXNORO proxy with coordinate rounding, local caching, and attribution.</li>
-      <li><strong>Transactional Email:</strong> Nodemailer SMTP relay integration for booking confirmations and owner reminders.</li>
-    </ul>
-  </section>
-
-  <section>
-    <h2>6. Implemented vs. Planned Functionality</h2>
+    <h2>5. Implemented vs. Planned Functionality</h2>
     <table>
       <thead>
         <tr>
@@ -275,39 +245,34 @@
       </thead>
       <tbody>
         <tr>
-          <td>Firebase Google Sign-In & Auth State Subscription</td>
+          <td>Five Planning Horizons & Time Matrix</td>
           <td><span class="badge implemented">Implemented</span></td>
-          <td>Fully integrated client-side in <code>src/platform/firebase.ts</code> and <code>src/App.tsx</code> to gate the React UI. Note that the Fastify backend does not implement server-side Firebase ID-token verification; local development owner authentication relies on a dev-only header and must not be presented as production-grade authentication.</td>
+          <td>Fully functional in <code>streamlit_app.py</code> for Daily, Weekly, Monthly, Yearly, and Five-Year views.</td>
         </tr>
         <tr>
-          <td>Local-First Time Matrix & 5 Planning Horizons</td>
+          <td>Activity & Routine CRUD with Recurrence Filtering</td>
           <td><span class="badge implemented">Implemented</span></td>
-          <td>Daily, weekly, monthly, yearly, and five-year views operational with Dexie persistence.</td>
+          <td>Supports daily, weekly, monthly, and yearly recurring routines with precise occurrence matching.</td>
         </tr>
         <tr>
-          <td>Micro-Bot Reminders & Substantial Notes</td>
+          <td>SQLite Persistence & JSON Backup/Restore</td>
           <td><span class="badge implemented">Implemented</span></td>
-          <td>Alerts, collapsible/expandable notes (up to 1,000 words), and notification/audio delivery.</td>
+          <td>Local SQLite storage and JSON export/import supported in <code>streamlit_app.py</code>.</td>
         </tr>
         <tr>
-          <td>Privacy-Safe Booking Projection & SQLite Server</td>
-          <td><span class="badge implemented">Implemented</span></td>
-          <td>Fastify backend with interval-only sync and conflict checking.</td>
-        </tr>
-        <tr>
-          <td>Shared Appointment Approval & SMTP Emails</td>
-          <td><span class="badge implemented">Implemented</span></td>
-          <td>Pending requests, owner approval/rejection, alternative proposals, and Nodemailer dispatch.</td>
-        </tr>
-        <tr>
-          <td>Dedicated Native Mobile Application (iOS/Android)</td>
+          <td>Micro-Bot Push Reminders</td>
           <td><span class="badge planned">Planned</span></td>
-          <td>Architecture supports future mobile wrappers, but current implementation is strictly a responsive web platform.</td>
+          <td>Architecture defined in <code>src/domain/reminders.ts</code>; inactive in current Streamlit MVP.</td>
         </tr>
         <tr>
-          <td>Hardware Smartwatch App Deployment</td>
+          <td>Shared Appointment Booking & Approval Workflows</td>
           <td><span class="badge planned">Planned</span></td>
-          <td>Designed for round/square viewports in web UI; physical smartwatch firmware/app packaging not implemented.</td>
+          <td>Fastify/SQLite server code exists in <code>server/</code>; inactive in current Streamlit MVP.</td>
+        </tr>
+        <tr>
+          <td>MET Norway Weather Integration</td>
+          <td><span class="badge planned">Planned</span></td>
+          <td>Service proxy defined in <code>server/weather/metNorway.ts</code>; inactive in current Streamlit MVP.</td>
         </tr>
       </tbody>
     </table>
