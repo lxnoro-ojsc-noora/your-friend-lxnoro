@@ -218,57 +218,83 @@ for i, (hz_key, hz_label) in enumerate(horizons.items()):
 
 st.markdown('</div>', unsafe_allow_html=True)
 
-# Helper function for robust recurrence and horizon evaluation
+# Helper function for precise horizon matching and recurrence schedule evaluation
 def matches_horizon(row, selected_horizon, today_dt):
+    import calendar
+    act_horizon = row["horizon"]
     act_date_str = row["date"]
     is_routine = row["is_routine"] if "is_routine" in row.keys() else 0
     rec_freq = row["recurrence_freq"] if "recurrence_freq" in row.keys() else "none"
-
+    
     try:
         act_dt = datetime.strptime(act_date_str, "%Y-%m-%d")
     except:
         act_dt = today_dt
 
-    today_str = today_dt.strftime("%Y-%m-%d")
+    # 1. Primary match: activity is assigned to its stored horizon
+    if act_horizon == selected_horizon:
+        return True
 
-    # 1. Routine recurrence evaluation rules
+    # 2. One-time activities stay strictly in their stored horizon
+    if is_routine == 0:
+        return False
+
+    # 3. Recurring routines evaluation according to schedule and selected period
     if is_routine == 1:
-        if rec_freq == "daily":
-            return True
-        elif rec_freq == "weekly":
-            if selected_horizon == "day":
-                return act_dt.weekday() == today_dt.weekday()
-            return True
-        elif rec_freq == "monthly":
-            if selected_horizon == "day":
-                return act_dt.day == today_dt.day
-            elif selected_horizon == "week":
+        if selected_horizon == "day":
+            if rec_freq == "daily":
                 return True
-            return True
-        elif rec_freq == "yearly":
-            if selected_horizon == "day":
-                return act_dt.month == today_dt.month and act_dt.day == today_dt.day
-            elif selected_horizon in ("week", "month"):
-                return act_dt.month == today_dt.month
-            return True
-        else:
-            return row["horizon"] == selected_horizon
+            elif rec_freq == "weekly":
+                return act_dt.weekday() == today_dt.weekday()
+            elif rec_freq == "monthly":
+                last_day = calendar.monthrange(today_dt.year, today_dt.month)[1]
+                effective_day = min(act_dt.day, last_day)
+                return today_dt.day == effective_day
+            elif rec_freq == "yearly":
+                target_month = act_dt.month
+                target_day = act_dt.day
+                if target_month == 2 and target_day == 29:
+                    target_day = 29 if calendar.isleap(today_dt.year) else 28
+                return today_dt.month == target_month and today_dt.day == target_day
 
-    # 2. One-time activity date range filtering
-    if selected_horizon == "day":
-        return act_date_str == today_str
-    elif selected_horizon == "week":
-        delta_days = (act_dt.date() - today_dt.date()).days
-        return 0 <= delta_days < 7
-    elif selected_horizon == "month":
-        return act_dt.year == today_dt.year and act_dt.month == today_dt.month
-    elif selected_horizon == "year":
-        return act_dt.year == today_dt.year
-    elif selected_horizon == "fiveYears":
-        year_diff = act_dt.year - today_dt.year
-        return 0 <= year_diff <= 5
-    else:
-        return row["horizon"] == selected_horizon
+        elif selected_horizon == "week":
+            start_of_week = today_dt - timedelta(days=(today_dt.weekday() + 6) % 7)
+            start_of_week = start_of_week.replace(hour=0, minute=0, second=0, microsecond=0)
+            end_of_week = start_of_week + timedelta(days=7)
+            
+            if rec_freq in ("daily", "weekly"):
+                return True
+            elif rec_freq == "monthly":
+                last_day = calendar.monthrange(today_dt.year, today_dt.month)[1]
+                eff_day = min(act_dt.day, last_day)
+                occ_dt = datetime(today_dt.year, today_dt.month, eff_day)
+                return start_of_week <= occ_dt < end_of_week
+            elif rec_freq == "yearly":
+                target_month = act_dt.month
+                target_day = act_dt.day
+                if target_month == 2 and target_day == 29 and not calendar.isleap(today_dt.year):
+                    target_day = 28
+                try:
+                    occ_dt = datetime(today_dt.year, target_month, target_day)
+                    return start_of_week <= occ_dt < end_of_week
+                except:
+                    return False
+
+        elif selected_horizon == "month":
+            if rec_freq in ("daily", "weekly", "monthly"):
+                return True
+            elif rec_freq == "yearly":
+                return act_dt.month == today_dt.month
+
+        elif selected_horizon == "year":
+            if rec_freq in ("daily", "weekly", "monthly", "yearly"):
+                return True
+
+        elif selected_horizon == "fiveYears":
+            if rec_freq in ("daily", "weekly", "monthly", "yearly") or act_horizon == "fiveYears":
+                return True
+
+    return False
 
 # Fetch all activities and filter by horizon/date rules in chronological order (date ASC, time ASC)
 conn = get_db()
