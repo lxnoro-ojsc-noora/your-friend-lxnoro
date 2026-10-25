@@ -173,21 +173,23 @@ with col_head_clock:
     <div class="live-clock-card" style="background: rgba(18, 24, 38, 0.9); border: 1px solid rgba(168, 85, 247, 0.3); border-radius: 12px; padding: 0.75rem 1.25rem; display: flex; align-items: center; gap: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.4); font-family: system-ui, -apple-system, sans-serif;">
         <span style="width: 10px; height: 10px; border-radius: 50%; background: #34d399; box-shadow: 0 0 10px #34d399; flex-shrink: 0;"></span>
         <div>
-            <div style="font-size: 0.75rem; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.05em;">Device Local Time</div>
-            <div id="top-right-live-clock" style="font-size: 0.95rem; font-weight: 700; color: #f8fafc; font-variant-numeric: tabular-nums;">Loading...</div>
+            <div id="top-right-live-date" style="font-size: 0.8rem; color: #d8b4fe; font-weight: 600; margin-bottom: 2px;">Loading date...</div>
+            <div id="top-right-live-clock" style="font-size: 0.95rem; font-weight: 700; color: #f8fafc; font-variant-numeric: tabular-nums;">Loading time...</div>
         </div>
     </div>
     <script>
       function updateClock() {
         const now = new Date();
-        const timeStr = now.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
-        document.getElementById('top-right-live-clock').innerText = timeStr;
+        const dateOptions = { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' };
+        const timeOptions = { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false };
+        document.getElementById('top-right-live-date').innerText = now.toLocaleDateString(undefined, dateOptions);
+        document.getElementById('top-right-live-clock').innerText = now.toLocaleTimeString(undefined, timeOptions);
       }
       updateClock();
       setInterval(updateClock, 1000);
     </script>
     """
-    components.html(clock_html, height=65, scrolling=False)
+    components.html(clock_html, height=75, scrolling=False)
 
 st.markdown("<div style='margin-top: 1.5rem;'></div>", unsafe_allow_html=True)
 
