@@ -131,7 +131,9 @@ h1, h2, p { margin-top: 0; }
 .starter-heading { align-items: center; }
 .starter-heading h2 { font-size: 17px; }
 .starter-heading p { font-size: 11px; }
-.starter-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin-top: 17px; }
+.starter-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-top: 17px; }
+input, textarea, select { background: #171321 !important; color: var(--text) !important; border: 1px solid rgba(191,151,255,.22) !important; }
+input:focus, textarea:focus, select:focus { border-color: var(--purple-bright) !important; box-shadow: 0 0 12px rgba(179,129,255,.25) !important; }
 .starter-card { min-width: 0; padding: 8px 9px 7px; border: 1px solid rgba(255,255,255,.07); border-radius: 12px; background: rgba(255,255,255,.025); transition: border-color .16s ease, background .16s ease; }
 .starter-card:hover { border-color: rgba(204,166,255,.2); background: rgba(255,255,255,.045); }
 .starter-main { width: 100%; min-width: 0; display: grid; grid-template-columns: auto minmax(0,1fr); align-items: center; gap: 2px 8px; border: 0; background: transparent; text-align: start; cursor: pointer; }
