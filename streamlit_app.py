@@ -218,7 +218,7 @@ for i, (hz_key, hz_label) in enumerate(horizons.items()):
 
 st.markdown('</div>', unsafe_allow_html=True)
 
-# Helper function for precise horizon matching and recurrence schedule evaluation
+# Helper function for precise horizon matching and exact-period recurrence evaluation
 def matches_horizon(row, selected_horizon, today_dt):
     import calendar
     act_horizon = row["horizon"]
@@ -235,11 +235,11 @@ def matches_horizon(row, selected_horizon, today_dt):
     if act_horizon == selected_horizon:
         return True
 
-    # 2. One-time activities stay strictly in their stored horizon
+    # 2. One-time activities stay strictly in their stored horizon (no cross-horizon leakage)
     if is_routine == 0:
         return False
 
-    # 3. Recurring routines evaluation according to schedule and selected period
+    # 3. Recurring routines evaluation based on actual occurrence date falling within exact view period
     if is_routine == 1:
         if selected_horizon == "day":
             if rec_freq == "daily":
@@ -248,41 +248,51 @@ def matches_horizon(row, selected_horizon, today_dt):
                 return act_dt.weekday() == today_dt.weekday()
             elif rec_freq == "monthly":
                 last_day = calendar.monthrange(today_dt.year, today_dt.month)[1]
-                effective_day = min(act_dt.day, last_day)
-                return today_dt.day == effective_day
+                eff_day = min(act_dt.day, last_day)
+                return today_dt.day == eff_day
             elif rec_freq == "yearly":
-                target_month = act_dt.month
-                target_day = act_dt.day
-                if target_month == 2 and target_day == 29:
-                    target_day = 29 if calendar.isleap(today_dt.year) else 28
-                return today_dt.month == target_month and today_dt.day == target_day
+                t_month = act_dt.month
+                t_day = act_dt.day
+                if t_month == 2 and t_day == 29:
+                    t_day = 29 if calendar.isleap(today_dt.year) else 28
+                return today_dt.month == t_month and today_dt.day == t_day
 
         elif selected_horizon == "week":
             start_of_week = today_dt - timedelta(days=(today_dt.weekday() + 6) % 7)
             start_of_week = start_of_week.replace(hour=0, minute=0, second=0, microsecond=0)
             end_of_week = start_of_week + timedelta(days=7)
             
-            if rec_freq in ("daily", "weekly"):
+            if rec_freq == "daily":
                 return True
+            elif rec_freq == "weekly":
+                occ_dt = start_of_week + timedelta(days=act_dt.weekday())
+                return start_of_week <= occ_dt < end_of_week
             elif rec_freq == "monthly":
                 last_day = calendar.monthrange(today_dt.year, today_dt.month)[1]
                 eff_day = min(act_dt.day, last_day)
-                occ_dt = datetime(today_dt.year, today_dt.month, eff_day)
-                return start_of_week <= occ_dt < end_of_week
-            elif rec_freq == "yearly":
-                target_month = act_dt.month
-                target_day = act_dt.day
-                if target_month == 2 and target_day == 29 and not calendar.isleap(today_dt.year):
-                    target_day = 28
                 try:
-                    occ_dt = datetime(today_dt.year, target_month, target_day)
+                    occ_dt = datetime(today_dt.year, today_dt.month, eff_day)
+                    return start_of_week <= occ_dt < end_of_week
+                except:
+                    return False
+            elif rec_freq == "yearly":
+                t_month = act_dt.month
+                t_day = act_dt.day
+                if t_month == 2 and t_day == 29 and not calendar.isleap(today_dt.year):
+                    t_day = 28
+                try:
+                    occ_dt = datetime(today_dt.year, t_month, t_day)
                     return start_of_week <= occ_dt < end_of_week
                 except:
                     return False
 
         elif selected_horizon == "month":
-            if rec_freq in ("daily", "weekly", "monthly"):
+            if rec_freq == "daily":
                 return True
+            elif rec_freq == "weekly":
+                return True # weekly occurrences happen every week within the month
+            elif rec_freq == "monthly":
+                return act_dt.day <= calendar.monthrange(today_dt.year, today_dt.month)[1]
             elif rec_freq == "yearly":
                 return act_dt.month == today_dt.month
 
@@ -291,8 +301,8 @@ def matches_horizon(row, selected_horizon, today_dt):
                 return True
 
         elif selected_horizon == "fiveYears":
-            if rec_freq in ("daily", "weekly", "monthly", "yearly") or act_horizon == "fiveYears":
-                return True
+            # Five-Year shows only activities explicitly assigned to that horizon
+            return False
 
     return False
 
